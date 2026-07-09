@@ -1,17 +1,17 @@
 insert into public.members
   (id, first_name, last_name, phone, email, weekly_quota, role, status)
 values
-  ('00000000-0000-4000-8000-000000000001', 'Fit East', 'Coach', '+447900000001', 'coach@fiteastlondon.test', 3, 'coach', 'active'),
-  ('00000000-0000-4000-8000-000000000101', 'Amira', 'Khan', '+447900000101', 'amira@example.test', 2, 'member', 'active'),
-  ('00000000-0000-4000-8000-000000000102', 'Ben', 'Taylor', '+447900000102', 'ben@example.test', 1, 'member', 'active'),
-  ('00000000-0000-4000-8000-000000000103', 'Cara', 'Morgan', '+447900000103', 'cara@example.test', 3, 'member', 'active'),
-  ('00000000-0000-4000-8000-000000000104', 'Dev', 'Patel', '+447900000104', 'dev@example.test', 2, 'member', 'active'),
-  ('00000000-0000-4000-8000-000000000105', 'Ella', 'Reed', '+447900000105', 'ella@example.test', 1, 'member', 'active'),
-  ('00000000-0000-4000-8000-000000000106', 'Finn', 'Osei', '+447900000106', 'finn@example.test', 2, 'member', 'active'),
-  ('00000000-0000-4000-8000-000000000107', 'Gia', 'Lewis', '+447900000107', 'gia@example.test', 3, 'member', 'active'),
-  ('00000000-0000-4000-8000-000000000108', 'Hugo', 'Wright', '+447900000108', 'hugo@example.test', 1, 'member', 'pending'),
-  ('00000000-0000-4000-8000-000000000109', 'Iris', 'Stone', '+447900000109', 'iris@example.test', 2, 'member', 'active'),
-  ('00000000-0000-4000-8000-000000000110', 'Jonah', 'Bell', '+447900000110', 'jonah@example.test', 1, 'member', 'active')
+  ('00000000-0000-4000-8000-000000000001', 'Fit East', 'Coach', '+447900000001', 'manu+coach@intentionalsets.com', 3, 'coach', 'active'),
+  ('00000000-0000-4000-8000-000000000101', 'Amira', 'Khan', '+447900000101', 'manu+amira@intentionalsets.com', 2, 'member', 'active'),
+  ('00000000-0000-4000-8000-000000000102', 'Ben', 'Taylor', '+447900000102', 'manu+ben@intentionalsets.com', 1, 'member', 'active'),
+  ('00000000-0000-4000-8000-000000000103', 'Cara', 'Morgan', '+447900000103', 'manu+cara@intentionalsets.com', 3, 'member', 'active'),
+  ('00000000-0000-4000-8000-000000000104', 'Dev', 'Patel', '+447900000104', 'manu+dev@intentionalsets.com', 2, 'member', 'active'),
+  ('00000000-0000-4000-8000-000000000105', 'Ella', 'Reed', '+447900000105', 'manu+ella@intentionalsets.com', 1, 'member', 'active'),
+  ('00000000-0000-4000-8000-000000000106', 'Finn', 'Osei', '+447900000106', 'manu+finn@intentionalsets.com', 2, 'member', 'active'),
+  ('00000000-0000-4000-8000-000000000107', 'Gia', 'Lewis', '+447900000107', 'manu+gia@intentionalsets.com', 3, 'member', 'active'),
+  ('00000000-0000-4000-8000-000000000108', 'Hugo', 'Wright', '+447900000108', 'manu+hugo@intentionalsets.com', 1, 'member', 'pending'),
+  ('00000000-0000-4000-8000-000000000109', 'Iris', 'Stone', '+447900000109', 'manu+iris@intentionalsets.com', 2, 'member', 'active'),
+  ('00000000-0000-4000-8000-000000000110', 'Jonah', 'Bell', '+447900000110', 'manu+jonah@intentionalsets.com', 1, 'member', 'active')
 on conflict (email) do nothing;
 
 insert into public.recurring_slots

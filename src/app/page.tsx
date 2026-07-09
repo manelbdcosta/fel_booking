@@ -81,6 +81,8 @@ const coach = {
   lastName: "Coach",
 };
 
+const correspondenceEmail = "manu@intentionalsets.com";
+
 const metricsBase = [
   { label: "Attended", value: "42", icon: CheckCircle2 },
   { label: "Missed", value: "1", icon: AlertTriangle },
@@ -314,7 +316,7 @@ export default function Home() {
 
   function submitSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setAuthMessage(`Magic link queued for ${signInEmail}.`);
+    setAuthMessage(`Magic link queued to ${correspondenceEmail}.`);
   }
 
   function submitRegistration(event: FormEvent<HTMLFormElement>) {
@@ -493,6 +495,9 @@ export default function Home() {
               {pendingRegistration.email}
             </div>
           </div>
+          <p className="mt-4 rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+            Approval correspondence is routed to {correspondenceEmail}.
+          </p>
 
           <button
             className="mt-5 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
@@ -590,7 +595,7 @@ export default function Home() {
                     type="email"
                     required
                     value={signInEmail}
-                    placeholder="you@example.com"
+                    placeholder={correspondenceEmail}
                     onChange={(event) => setSignInEmail(event.target.value)}
                   />
                 </div>

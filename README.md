@@ -31,10 +31,15 @@ Open `http://localhost:3000`.
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public Supabase browser key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only key for admin jobs and seeds |
 | `RESEND_API_KEY` | Resend API key |
+| `CORRESPONDENCE_EMAIL` | Current single inbox for app correspondence |
 | `EMAIL_FROM` | Sender used for transactional emails |
+| `EMAIL_REPLY_TO` | Reply-to address for transactional emails |
+| `COACH_NOTIFICATION_EMAILS` | Comma-separated coach notification recipients |
 | `APP_URL` | Base URL included in member emails |
 | `CREDIT_ON_NO_SHOW` | `true` by default; set `false` to stop no-shows issuing credits |
 | `CRON_SECRET` | Shared secret for scheduled job endpoints |
+
+For the current build, correspondence defaults to `manu@intentionalsets.com`.
 
 ## Database
 
@@ -47,7 +52,7 @@ supabase start
 supabase db reset
 ```
 
-The seed data in `supabase/seed.sql` creates one coach, ten members, recurring slots, and two weeks of materialized bookings.
+The seed data in `supabase/seed.sql` creates one coach, ten members, recurring slots, and two weeks of materialized bookings. Seed identities use unique `manu+...@intentionalsets.com` addresses so local auth remains compatible with the database's unique email rule.
 
 ## Business Rules
 
