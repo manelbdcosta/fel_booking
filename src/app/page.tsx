@@ -79,6 +79,8 @@ type RegularSlot = {
 type RegularSlotChangeRequest = {
   id: string;
   memberName: string;
+  abandonedDay?: string;
+  abandonedTime?: string;
   requestedDay: string;
   requestedTime: string;
   effectiveWeek: string;
@@ -87,6 +89,8 @@ type RegularSlotChangeRequest = {
 };
 
 type RegularSlotChangeForm = {
+  abandonedDay: string;
+  abandonedTime: string;
   requestedDay: string;
   requestedTime: string;
   effectiveWeek: string;
@@ -241,6 +245,8 @@ const initialRegularSlotRequests: RegularSlotChangeRequest[] = [
   {
     id: "regular-request-1",
     memberName: "Maddie Cannon",
+    abandonedDay: "Monday",
+    abandonedTime: "06:30",
     requestedDay: "Tuesday",
     requestedTime: "07:30",
     effectiveWeek: "2026-07-20",
@@ -552,6 +558,8 @@ export default function Home() {
   const [regularSlotDraftNotice, setRegularSlotDraftNotice] = useState("");
   const [regularSlotChangeForm, setRegularSlotChangeForm] =
     useState<RegularSlotChangeForm>({
+      abandonedDay: "Monday",
+      abandonedTime: "06:30",
       requestedDay: "Tuesday",
       requestedTime: "07:30",
       effectiveWeek: "2026-07-20",
@@ -1166,11 +1174,47 @@ export default function Home() {
     setMessage(`Approved ${fullName(memberToApprove)} for member access.`);
   }
 
+  function openRegularSlotRequest() {
+    const abandonedSlot =
+      regularSlots.find(
+        (slot) =>
+          slot.day === regularSlotChangeForm.abandonedDay &&
+          slot.time === regularSlotChangeForm.abandonedTime,
+      ) ?? regularSlots[0];
+
+    if (!abandonedSlot) {
+      setMessage("A regular slot must be assigned before requesting a change.");
+      return;
+    }
+
+    setRegularSlotChangeForm((current) => ({
+      ...current,
+      abandonedDay: abandonedSlot.day,
+      abandonedTime: abandonedSlot.time,
+    }));
+    setRegularSlotRequestOpen(true);
+  }
+
   async function submitRegularSlotRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (regularSlots.length === 0) {
+      setMessage("A regular slot must be assigned before requesting a change.");
+      return;
+    }
+
+    if (
+      regularSlotChangeForm.abandonedDay === regularSlotChangeForm.requestedDay &&
+      regularSlotChangeForm.abandonedTime === regularSlotChangeForm.requestedTime
+    ) {
+      setMessage("Choose a different new slot before submitting the request.");
+      return;
+    }
+
     const response = await fetch(publicAppPath("/api/regular-slot-requests"), {
       body: JSON.stringify({
+        abandonedDay: regularSlotChangeForm.abandonedDay,
+        abandonedTime: regularSlotChangeForm.abandonedTime,
         effectiveWeek: regularSlotChangeForm.effectiveWeek,
         memberId: activeMember.id,
         note: regularSlotChangeForm.note,
@@ -1195,6 +1239,8 @@ export default function Home() {
       {
         id: payload.id ?? `regular-request-${Date.now()}`,
         memberName: activeMemberFullName,
+        abandonedDay: regularSlotChangeForm.abandonedDay,
+        abandonedTime: regularSlotChangeForm.abandonedTime,
         requestedDay: regularSlotChangeForm.requestedDay,
         requestedTime: regularSlotChangeForm.requestedTime,
         effectiveWeek: regularSlotChangeForm.effectiveWeek,
@@ -1205,6 +1251,8 @@ export default function Home() {
     queueCorrespondence({
       kind: "regular-slot-change-requested",
       memberName: activeMemberFullName,
+      abandonedDay: regularSlotChangeForm.abandonedDay,
+      abandonedTime: regularSlotChangeForm.abandonedTime,
       requestedDay: regularSlotChangeForm.requestedDay,
       requestedTime: regularSlotChangeForm.requestedTime,
       effectiveWeek: effectiveWeekLabel(regularSlotChangeForm.effectiveWeek),
@@ -1434,18 +1482,20 @@ export default function Home() {
             day: request.requestedDay,
             time: request.requestedTime,
           };
-          const quota =
-            weeklyQuotasByMember[requestMember.id] ?? requestMember.weeklyQuota;
+          const keptSlots =
+            request.abandonedDay && request.abandonedTime
+              ? currentSlots.filter(
+                  (slot) =>
+                    slot.day !== request.abandonedDay ||
+                    slot.time !== request.abandonedTime,
+                )
+              : currentSlots.slice(0, -1);
 
-          if (currentSlots.some((slot) => sameRegularSlot(slot, nextSlot))) {
+          if (keptSlots.some((slot) => sameRegularSlot(slot, nextSlot))) {
             return currentSlots;
           }
 
-          if (currentSlots.length >= quota) {
-            return [...currentSlots.slice(0, -1), nextSlot];
-          }
-
-          return [...currentSlots, nextSlot];
+          return [...keptSlots, nextSlot];
         })(),
       }));
 
@@ -1456,12 +1506,16 @@ export default function Home() {
     queueCorrespondence({
       kind: "regular-slot-request-approved",
       memberName: request.memberName,
+      abandonedDay: request.abandonedDay,
+      abandonedTime: request.abandonedTime,
       requestedDay: request.requestedDay,
       requestedTime: request.requestedTime,
       effectiveWeek: effectiveWeekLabel(request.effectiveWeek),
     });
     setMessage(
-      `Approved ${request.memberName}'s regular slot request for ${request.requestedDay} ${request.requestedTime}.`,
+      request.abandonedDay && request.abandonedTime
+        ? `Approved ${request.memberName}'s regular slot change from ${request.abandonedDay} ${request.abandonedTime} to ${request.requestedDay} ${request.requestedTime}.`
+        : `Approved ${request.memberName}'s regular slot request for ${request.requestedDay} ${request.requestedTime}.`,
     );
   }
 
@@ -1492,6 +1546,8 @@ export default function Home() {
     queueCorrespondence({
       kind: "regular-slot-request-declined",
       memberName: request.memberName,
+      abandonedDay: request.abandonedDay,
+      abandonedTime: request.abandonedTime,
       requestedDay: request.requestedDay,
       requestedTime: request.requestedTime,
       effectiveWeek: effectiveWeekLabel(request.effectiveWeek),
@@ -2452,7 +2508,8 @@ export default function Home() {
               <button
                 className="mt-3 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
                 type="button"
-                onClick={() => setRegularSlotRequestOpen(true)}
+                disabled={regularSlots.length === 0}
+                onClick={openRegularSlotRequest}
               >
                 Request change
               </button>
@@ -2480,10 +2537,22 @@ export default function Home() {
                         {isCoach && (
                           <div className="text-sm font-medium">{request.memberName}</div>
                         )}
-                        <div className="text-sm text-[var(--muted)]">
-                          {request.requestedDay} {request.requestedTime} from{" "}
-                          {effectiveWeekLabel(request.effectiveWeek)}
-                        </div>
+                        {request.abandonedDay && request.abandonedTime ? (
+                          <div className="text-sm text-[var(--muted)]">
+                            From {request.abandonedDay} {request.abandonedTime} to{" "}
+                            {request.requestedDay} {request.requestedTime}
+                            <span className="block">
+                              Effective {effectiveWeekLabel(request.effectiveWeek)}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="text-sm text-[var(--muted)]">
+                            To {request.requestedDay} {request.requestedTime}
+                            <span className="block">
+                              Effective {effectiveWeekLabel(request.effectiveWeek)}
+                            </span>
+                          </div>
+                        )}
                       </div>
                       <div className="rounded-md border border-[var(--line)] px-2 py-1 text-xs text-[var(--muted)]">
                         {request.status}
@@ -2935,9 +3004,33 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm font-medium" htmlFor="abandonedSlot">
+              Current regular slot
+              <select
+                className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                id="abandonedSlot"
+                value={`${regularSlotChangeForm.abandonedDay}|${regularSlotChangeForm.abandonedTime}`}
+                onChange={(event) => {
+                  const [day, time] = event.target.value.split("|");
+
+                  setRegularSlotChangeForm((current) => ({
+                    ...current,
+                    abandonedDay: day ?? "",
+                    abandonedTime: time ?? "",
+                  }));
+                }}
+              >
+                {regularSlots.map((slot) => (
+                  <option key={slot.id} value={`${slot.day}|${slot.time}`}>
+                    {slot.day} {slot.time}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="block text-sm font-medium" htmlFor="requestedDay">
-                Day
+                New day
                 <select
                   className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
                   id="requestedDay"
@@ -2956,7 +3049,7 @@ export default function Home() {
               </label>
 
               <label className="block text-sm font-medium" htmlFor="requestedTime">
-                Time
+                New time
                 <select
                   className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
                   id="requestedTime"

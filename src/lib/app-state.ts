@@ -9,6 +9,8 @@ export type PersistedAppState = {
   regularSlotRequests: Array<{
     id: string;
     memberName: string;
+    abandonedDay?: string;
+    abandonedTime?: string;
     requestedDay: string;
     requestedTime: string;
     effectiveWeek: string;

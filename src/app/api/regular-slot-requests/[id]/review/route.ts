@@ -13,10 +13,11 @@ type ReviewParams = {
 
 type RequestRow = {
   member_id: string;
+  abandoned_weekday: number | null;
+  abandoned_start_time: string | null;
   requested_weekday: number;
   requested_start_time: string;
   effective_from: string;
-  weekly_quota: number;
 };
 
 type SlotRow = {
@@ -60,10 +61,11 @@ export async function POST(request: Request, { params }: ReviewParams) {
       `
         select
           regular_slot_change_requests.member_id,
+          regular_slot_change_requests.abandoned_weekday,
+          regular_slot_change_requests.abandoned_start_time,
           regular_slot_change_requests.requested_weekday,
           regular_slot_change_requests.requested_start_time,
-          regular_slot_change_requests.effective_from,
-          members.weekly_quota
+          regular_slot_change_requests.effective_from
         from regular_slot_change_requests
         join members on members.id = regular_slot_change_requests.member_id
         where regular_slot_change_requests.id = ?1
@@ -93,6 +95,16 @@ export async function POST(request: Request, { params }: ReviewParams) {
   ];
 
   if (status === "approved") {
+    if (!requestRow.abandoned_weekday || !requestRow.abandoned_start_time) {
+      return NextResponse.json(
+        {
+          error:
+            "This request does not record which regular slot is being abandoned.",
+        },
+        { status: 409 },
+      );
+    }
+
     const currentSlots = (
       await db
         .prepare(
@@ -106,68 +118,71 @@ export async function POST(request: Request, { params }: ReviewParams) {
         .bind(requestRow.member_id)
         .all<SlotRow>()
     ).results;
+    const slotToReplace = currentSlots.find(
+      (slot) =>
+        slot.weekday === requestRow.abandoned_weekday &&
+        slot.start_time === requestRow.abandoned_start_time,
+    );
     const duplicate = currentSlots.some(
       (slot) =>
         slot.weekday === requestRow.requested_weekday &&
         slot.start_time === requestRow.requested_start_time,
     );
 
-    if (!duplicate) {
-      statements.push(
-        db
-          .prepare(
-            `
-              update bookings
-              set
-                status = 'cancelled',
-                cancelled_at = datetime('now'),
-                cancelled_by = ?1,
-                updated_at = datetime('now')
-              where
-                member_id = ?2
-                and session_date >= ?3
-                and status = 'booked'
-                and kind = 'regular'
-                and source_recurring_slot_id is not null
-            `,
-          )
-          .bind(user.id, requestRow.member_id, requestRow.effective_from),
-      );
-
-      if (currentSlots.length >= requestRow.weekly_quota) {
-        const slotToReplace = currentSlots.at(-1);
-
-        if (slotToReplace) {
-          statements.push(
-            db
-              .prepare("delete from recurring_slots where id = ?1")
-              .bind(slotToReplace.id),
-          );
-        }
-      }
-
-      statements.push(
-        db
-          .prepare(
-            `
-              insert into recurring_slots (
-                id,
-                member_id,
-                weekday,
-                start_time,
-                effective_from
-              ) values (?1, ?2, ?3, ?4, ?5)
-            `,
-          )
-          .bind(
-            `regular-${requestId}`,
-            requestRow.member_id,
-            requestRow.requested_weekday,
-            requestRow.requested_start_time,
-            requestRow.effective_from,
-          ),
+    if (!slotToReplace) {
+      return NextResponse.json(
+        { error: "The abandoned regular slot is no longer assigned." },
+        { status: 409 },
       );
     }
+
+    if (duplicate) {
+      return NextResponse.json(
+        { error: "The requested regular slot is already assigned." },
+        { status: 409 },
+      );
+    }
+
+    statements.push(
+      db
+        .prepare(
+          `
+            update bookings
+            set
+              status = 'cancelled',
+              cancelled_at = datetime('now'),
+              cancelled_by = ?1,
+              updated_at = datetime('now')
+            where
+              member_id = ?2
+              and session_date >= ?3
+              and status = 'booked'
+              and kind = 'regular'
+              and source_recurring_slot_id = ?4
+          `,
+        )
+        .bind(user.id, requestRow.member_id, requestRow.effective_from, slotToReplace.id),
+      db.prepare("delete from recurring_slots where id = ?1").bind(slotToReplace.id),
+      db
+        .prepare(
+          `
+            insert into recurring_slots (
+              id,
+              member_id,
+              weekday,
+              start_time,
+              effective_from
+            ) values (?1, ?2, ?3, ?4, ?5)
+          `,
+        )
+        .bind(
+          `regular-${requestId}`,
+          requestRow.member_id,
+          requestRow.requested_weekday,
+          requestRow.requested_start_time,
+          requestRow.effective_from,
+        ),
+    );
   }
 
   if (db.batch) {

@@ -74,8 +74,9 @@ describe("demo member journey", () => {
     expect(screen.queryByText("Emma, Gemma, Reserved, Drop-in")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Request change" }));
-    await user.selectOptions(screen.getByLabelText("Day"), "Friday");
-    await user.selectOptions(screen.getByLabelText("Time"), "08:30");
+    await user.selectOptions(screen.getByLabelText("Current regular slot"), "Monday|06:30");
+    await user.selectOptions(screen.getByLabelText("New day"), "Friday");
+    await user.selectOptions(screen.getByLabelText("New time"), "08:30");
     await user.selectOptions(screen.getByLabelText("Effective week"), "2026-07-27");
     await user.type(screen.getByLabelText("Note"), "Shift pattern changed.");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
@@ -83,7 +84,8 @@ describe("demo member journey", () => {
     expect(
       screen.getByText("Regular slot change request sent to the coaches."),
     ).toBeTruthy();
-    expect(screen.getByText(/Friday 08:30 from Mon 27 Jul/)).toBeTruthy();
+    expect(screen.getByText(/From Monday 06:30 to Friday 08:30/)).toBeTruthy();
+    expect(screen.getByText(/Effective Mon 27 Jul/)).toBeTruthy();
 
     await user.click(
       screen.getAllByRole("button", { name: /07:30.*Open/ })[0],
@@ -191,7 +193,9 @@ describe("demo coach journey", () => {
     await user.click(screen.getByRole("button", { name: "Approve" }));
 
     expect(
-      screen.getByText(/Approved Maddie Cannon's regular slot request for Tuesday 07:30/),
+      screen.getByText(
+        /Approved Maddie Cannon's regular slot change from Monday 06:30 to Tuesday 07:30/,
+      ),
     ).toBeTruthy();
     expect(screen.getByText("approved")).toBeTruthy();
 

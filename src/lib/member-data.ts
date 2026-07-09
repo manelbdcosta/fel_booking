@@ -27,6 +27,8 @@ type RegularSlotRequestRow = {
   id: string;
   first_name: string;
   last_name: string;
+  abandoned_weekday: number | null;
+  abandoned_start_time: string | null;
   requested_weekday: number;
   requested_start_time: string;
   effective_from: string;
@@ -86,6 +88,8 @@ export async function readBootstrapData(db: D1DatabaseBinding) {
         regular_slot_change_requests.id,
         members.first_name,
         members.last_name,
+        regular_slot_change_requests.abandoned_weekday,
+        regular_slot_change_requests.abandoned_start_time,
         regular_slot_change_requests.requested_weekday,
         regular_slot_change_requests.requested_start_time,
         regular_slot_change_requests.effective_from,
@@ -132,6 +136,10 @@ export async function readBootstrapData(db: D1DatabaseBinding) {
   const regularSlotRequests = requestRows.map((row) => ({
     id: row.id,
     memberName: fullName(row),
+    abandonedDay: row.abandoned_weekday
+      ? (weekdaysByNumber[row.abandoned_weekday] ?? "")
+      : "",
+    abandonedTime: row.abandoned_start_time ?? "",
     requestedDay: weekdaysByNumber[row.requested_weekday] ?? "Monday",
     requestedTime: row.requested_start_time,
     effectiveWeek: row.effective_from,

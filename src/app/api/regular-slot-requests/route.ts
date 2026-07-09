@@ -25,15 +25,35 @@ export async function POST(request: Request) {
   const record =
     body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   const memberId = cleanText(record.memberId, 120);
+  const abandonedDay = cleanText(record.abandonedDay, 20);
+  const abandonedTime = cleanText(record.abandonedTime, 5);
   const requestedDay = cleanText(record.requestedDay, 20);
   const requestedTime = cleanText(record.requestedTime, 5);
   const effectiveWeek = cleanText(record.effectiveWeek, 10);
   const note = cleanText(record.note, 500);
-  const weekday = weekdayNumbers[requestedDay];
+  const abandonedWeekday = weekdayNumbers[abandonedDay];
+  const requestedWeekday = weekdayNumbers[requestedDay];
 
-  if (!memberId || !weekday || !allowedTimes.has(requestedTime) || !effectiveWeek) {
+  if (
+    !memberId ||
+    !abandonedWeekday ||
+    !allowedTimes.has(abandonedTime) ||
+    !requestedWeekday ||
+    !allowedTimes.has(requestedTime) ||
+    !effectiveWeek
+  ) {
     return NextResponse.json(
-      { error: "Member, day, time, and effective week are required." },
+      {
+        error:
+          "Member, current slot, requested slot, and effective week are required.",
+      },
+      { status: 400 },
+    );
+  }
+
+  if (abandonedWeekday === requestedWeekday && abandonedTime === requestedTime) {
+    return NextResponse.json(
+      { error: "Requested slot must be different from the current slot." },
       { status: 400 },
     );
   }
@@ -52,6 +72,50 @@ export async function POST(request: Request) {
     );
   }
 
+  const abandonedSlot = await db
+    .prepare(
+      `
+        select id
+        from recurring_slots
+        where
+          member_id = ?1
+          and weekday = ?2
+          and start_time = ?3
+          and effective_until is null
+      `,
+    )
+    .bind(memberId, abandonedWeekday, abandonedTime)
+    .first<{ id: string }>();
+
+  if (!abandonedSlot) {
+    return NextResponse.json(
+      { error: "Choose one of the member's current regular slots to change." },
+      { status: 400 },
+    );
+  }
+
+  const existingRequestedSlot = await db
+    .prepare(
+      `
+        select id
+        from recurring_slots
+        where
+          member_id = ?1
+          and weekday = ?2
+          and start_time = ?3
+          and effective_until is null
+      `,
+    )
+    .bind(memberId, requestedWeekday, requestedTime)
+    .first<{ id: string }>();
+
+  if (existingRequestedSlot) {
+    return NextResponse.json(
+      { error: "The requested slot is already one of the member's regular slots." },
+      { status: 400 },
+    );
+  }
+
   const requestId = createId("regular-request");
 
   await db
@@ -60,15 +124,26 @@ export async function POST(request: Request) {
         insert into regular_slot_change_requests (
           id,
           member_id,
+          abandoned_weekday,
+          abandoned_start_time,
           requested_weekday,
           requested_start_time,
           effective_from,
           note,
           status
-        ) values (?1, ?2, ?3, ?4, ?5, ?6, 'pending')
+        ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending')
       `,
     )
-    .bind(requestId, memberId, weekday, requestedTime, effectiveWeek, note || null)
+    .bind(
+      requestId,
+      memberId,
+      abandonedWeekday,
+      abandonedTime,
+      requestedWeekday,
+      requestedTime,
+      effectiveWeek,
+      note || null,
+    )
     .run();
 
   return NextResponse.json({ id: requestId }, { status: 201 });

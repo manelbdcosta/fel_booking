@@ -23,6 +23,8 @@ export type CorrespondenceEvent = {
   lastName?: string;
   email?: string;
   phone?: string;
+  abandonedDay?: string;
+  abandonedTime?: string;
   requestedDay?: string;
   requestedTime?: string;
   day?: string;
@@ -150,6 +152,8 @@ function rowsForEvent(event: CorrespondenceEvent) {
     row("Email", event.email),
     row("Phone", event.phone),
     row("Actor email", event.actorEmail),
+    row("Abandoned day", event.abandonedDay),
+    row("Abandoned time", event.abandonedTime),
     row("Requested day", event.requestedDay),
     row("Requested time", event.requestedTime),
     row("Assigned day", event.day),
@@ -184,6 +188,8 @@ export function parseCorrespondenceEvent(value: unknown) {
     lastName: cleanText(record.lastName),
     email: cleanText(record.email),
     phone: cleanText(record.phone),
+    abandonedDay: cleanText(record.abandonedDay),
+    abandonedTime: cleanText(record.abandonedTime),
     requestedDay: cleanText(record.requestedDay),
     requestedTime: cleanText(record.requestedTime),
     day: cleanText(record.day),

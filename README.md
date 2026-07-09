@@ -143,6 +143,7 @@ The current demo journeys covered by tests are:
 - New members create a password when requesting access. Existing accounts without a password can use Forgot password to set one.
 - Cancelling a makeup booking loses the credit rather than extending it.
 - Regular recurring slots are coach-managed only. Members may submit change requests, but they cannot create or edit recurring slots themselves.
+- Regular slot change requests record both the current slot being abandoned and the requested new slot.
 - Coach-approved future recurring-slot changes replace future materialized regular bookings without generating credits.
 - Dashboard counters are lifetime totals.
 - Archiving a member cancels future bookings, removes recurring slots, clears waitlists, and preserves history.
