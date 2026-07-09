@@ -8,6 +8,7 @@ import {
 import type { SessionUser } from "@/lib/server-auth";
 
 export type ScheduleSlotData = {
+  closed?: boolean;
   time: string;
   names: string[];
   memberIds: string[];
@@ -75,6 +76,11 @@ type CreditRow = {
 
 type WaitlistRow = {
   id: string;
+  session_date: string;
+  start_time: string;
+};
+
+type SlotClosureRow = {
   session_date: string;
   start_time: string;
 };
@@ -285,6 +291,25 @@ async function activeBookingCountForSlot(
   return Number(row?.count ?? 0);
 }
 
+async function isSlotClosed(
+  db: D1DatabaseBinding,
+  sessionDate: string,
+  startTime: string,
+) {
+  const closure = await db
+    .prepare(
+      `
+        select id
+        from slot_closures
+        where session_date = ?1 and start_time = ?2
+      `,
+    )
+    .bind(sessionDate, startTime)
+    .first<{ id: string }>();
+
+  return Boolean(closure);
+}
+
 async function availableCreditIdFor(
   db: D1DatabaseBinding,
   memberId: string,
@@ -309,7 +334,7 @@ async function availableCreditIdFor(
   return credit?.id ?? null;
 }
 
-async function materializeRegularBookingsForWeek(
+export async function materializeRegularBookingsForWeek(
   db: D1DatabaseBinding,
   weekStart: string,
 ) {
@@ -372,6 +397,13 @@ async function materializeRegularBookingsForWeek(
                     and existing_slot.start_time = ?4
                     and existing_slot.status = 'booked'
                 ) < ?6
+                and not exists (
+                  select 1
+                  from slot_closures closure
+                  where
+                    closure.session_date = ?3
+                    and closure.start_time = ?4
+                )
             `,
           )
           .bind(
@@ -405,6 +437,19 @@ export async function readScheduleData(
 
   const weekEnd = addDays(weekStart, 4);
   const today = todayIsoDate();
+  const closureRows = await allRows<SlotClosureRow>(
+    db,
+    `
+      select session_date, start_time
+      from slot_closures
+      where session_date between ?1 and ?2
+    `,
+    weekStart,
+    weekEnd,
+  );
+  const closedSlots = new Set(
+    closureRows.map((closure) => `${closure.session_date}:${closure.start_time}`),
+  );
   const bookingRows = await allRows<BookingRow>(
     db,
     `
@@ -438,9 +483,11 @@ export async function readScheduleData(
         const slotBookings = bookingRows.filter(
           (booking) => booking.session_date === isoDate && booking.start_time === time,
         );
+        const closed = closedSlots.has(`${isoDate}:${time}`);
 
         if (user.role === "coach") {
           return {
+            closed,
             time,
             names: slotBookings.map((booking) => booking.first_name),
             memberIds: slotBookings.map((booking) => booking.member_id),
@@ -448,6 +495,7 @@ export async function readScheduleData(
         }
 
         return {
+          closed,
           time,
           names: slotBookings.map((booking) =>
             booking.member_id === user.id ? booking.first_name : "Booked",
@@ -562,6 +610,10 @@ export async function createBooking(
 
   if (!targetMember || targetMember.status !== "active") {
     return { ok: false, status: 404, error: "Active member not found." };
+  }
+
+  if (await isSlotClosed(db, sessionDate, startTime)) {
+    return { ok: false, status: 409, error: "This session is closed." };
   }
 
   await materializeRegularBookingsForWeek(db, weekStart);
@@ -803,6 +855,10 @@ export async function joinWaitlist(
 
   if (!targetMember || targetMember.status !== "active") {
     return { ok: false, status: 404, error: "Active member not found." };
+  }
+
+  if (await isSlotClosed(db, sessionDate, startTime)) {
+    return { ok: false, status: 409, error: "This session is closed." };
   }
 
   await materializeRegularBookingsForWeek(db, weekStart);

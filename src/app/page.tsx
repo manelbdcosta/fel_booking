@@ -26,11 +26,13 @@ import {
 } from "@/lib/app-state";
 import { publicAppPath } from "@/lib/public-url";
 
-type SlotState = "available" | "mine" | "full";
+type SlotState = "available" | "mine" | "full" | "closed";
 type DemoRole = "member" | "coach";
+type CoachMode = "mission" | "member";
 type AuthMode = "sign-in" | "register" | "forgot-password" | "reset-password";
 
 type ScheduleSlot = {
+  closed?: boolean;
   memberIds?: string[];
   time: string;
   names: string[];
@@ -47,6 +49,12 @@ type SelectedSlot = {
   weekOffset: number;
   dayIndex: number;
   slotIndex: number;
+};
+
+type SlotClosurePrompt = {
+  dayIndex: number;
+  slotIndex: number;
+  names: string[];
 };
 
 type Credit = {
@@ -421,6 +429,10 @@ function fullName(person: Pick<DemoMember, "firstName" | "lastName">) {
 }
 
 function slotState(slot: ScheduleSlot, activeMember: DemoMember): SlotState {
+  if (slot.closed) {
+    return "closed";
+  }
+
   if (
     slot.memberIds?.includes(activeMember.id) ||
     (!slot.memberIds && slot.names.includes(activeMember.firstName))
@@ -445,6 +457,10 @@ function slotClasses(state: SlotState) {
 
   if (state === "full") {
     return `${base} border-[rgba(255,78,184,0.55)] bg-[rgba(255,78,184,0.08)] text-white`;
+  }
+
+  if (state === "closed") {
+    return `${base} border-[var(--line)] bg-black/30 text-[var(--muted)]`;
   }
 
   return `${base} border-[var(--line)] bg-[var(--panel)] text-white hover:border-[var(--orange)]`;
@@ -508,6 +524,7 @@ function clearPendingReviewMemberId(memberId: string) {
 export default function Home() {
   const appStateSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [currentRole, setCurrentRole] = useState<DemoRole | null>(null);
+  const [coachMode, setCoachMode] = useState<CoachMode>("mission");
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
   const [signInEmail, setSignInEmail] = useState("");
@@ -573,12 +590,15 @@ export default function Home() {
       effectiveWeek: "2026-07-20",
     });
   const [selectedSlot, setSelectedSlot] = useState<SelectedSlot | null>(null);
+  const [slotClosurePrompt, setSlotClosurePrompt] =
+    useState<SlotClosurePrompt | null>(null);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsRead, setNotificationsRead] = useState(false);
   const [appStateLoaded, setAppStateLoaded] = useState(false);
   const [message, setMessage] = useState("Ready for bookings");
   const isCoach = currentRole === "coach";
+  const isMissionControl = isCoach && coachMode === "mission";
   const coachNames = coaches.join(", ");
   const activeMember =
     members.find((demoMember) => demoMember.id === selectedMemberId) ?? members[0] ?? member;
@@ -647,6 +667,12 @@ export default function Home() {
     0,
   );
   const coachDayCapacity = coachDay.slots.length * bookingRules.slotCapacity;
+  const weekBookingCount = week.reduce(
+    (count, day) =>
+      count + day.slots.reduce((slotCount, slot) => slotCount + slot.names.length, 0),
+    0,
+  );
+  const weekCapacity = week.length * bookingRules.slotTimes.length * bookingRules.slotCapacity;
   const coachDayIsToday = coachDay.isoDate === todayIsoDate();
 
   const availableSlots = week.flatMap((day, dayIndex) =>
@@ -772,6 +798,11 @@ export default function Home() {
               (loadedMember) => loadedMember.id === reviewMemberId,
             )
           : null;
+
+      if (user.role === "coach") {
+        setCoachMode(reviewMember ? "member" : "mission");
+      }
+
       const scheduleMemberId =
         reviewMember?.id ??
         (user.role === "member" ? user.id : bootstrapData?.members?.[0]?.id);
@@ -865,6 +896,11 @@ export default function Home() {
                   (loadedMember) => loadedMember.id === reviewMemberId,
                 )
               : null;
+
+          if (signedInUser.role === "coach") {
+            setCoachMode(reviewMember ? "member" : "mission");
+          }
+
           const scheduleMemberId =
             reviewMember?.id ??
             (signedInUser.role === "member"
@@ -1170,6 +1206,7 @@ export default function Home() {
 
   function enterDemo(role: DemoRole) {
     setCurrentRole(role);
+    setCoachMode(role === "coach" ? "mission" : "member");
     setCurrentUser(null);
     setWeekOffset(0);
     setCoachDayIndex(sessionDayIndexFromIso(todayIsoDate()));
@@ -1188,13 +1225,84 @@ export default function Home() {
       () => undefined,
     );
     setCurrentRole(null);
+    setCoachMode("mission");
     setCurrentUser(null);
     setSelectedSlot(null);
+    setSlotClosurePrompt(null);
     setBookingOpen(false);
     setRegularSlotRequestOpen(false);
     setCoachRegularSlotOpen(false);
     setNotificationsOpen(false);
     setMessage("Ready for bookings");
+  }
+
+  function requestCloseSlot(dayIndex: number, slotIndex: number) {
+    const slot = week[dayIndex]?.slots[slotIndex];
+
+    if (!slot) {
+      return;
+    }
+
+    if (slot.names.length > 0) {
+      setSlotClosurePrompt({ dayIndex, names: slot.names, slotIndex });
+      return;
+    }
+
+    void closeStudioSlot(dayIndex, slotIndex);
+  }
+
+  async function closeStudioSlot(
+    dayIndex: number,
+    slotIndex: number,
+    confirmOccupied = false,
+  ) {
+    const day = week[dayIndex];
+    const slot = day?.slots[slotIndex];
+
+    if (!day || !slot) {
+      return;
+    }
+
+    const response = await fetch(publicAppPath("/api/slot-closures"), {
+      body: JSON.stringify({
+        confirmOccupied,
+        memberId: activeMember.id,
+        sessionDate: day.isoDate,
+        startTime: slot.time,
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      bookings?: Array<{ memberName: string }>;
+      emailError?: string | null;
+      error?: string;
+      notificationSent?: boolean;
+      notifiedCount?: number;
+      requiresConfirmation?: boolean;
+    };
+
+    if (response.status === 409 && payload.requiresConfirmation) {
+      setSlotClosurePrompt({
+        dayIndex,
+        names: payload.bookings?.map((booking) => booking.memberName) ?? slot.names,
+        slotIndex,
+      });
+      return;
+    }
+
+    if (!response.ok) {
+      setMessage(payload.error ?? "Could not close this slot yet.");
+      return;
+    }
+
+    setSlotClosurePrompt(null);
+    await loadScheduleData(activeMember.id, weekOffset);
+    setMessage(
+      payload.notificationSent === false
+        ? `Closed ${bookingLabel(day)} at ${slot.time}, but notification email failed: ${payload.emailError ?? "unknown error"}`
+        : `Closed ${bookingLabel(day)} at ${slot.time}. ${payload.notifiedCount ?? 0} member emails sent.`,
+    );
   }
 
   async function approveMemberAccess(memberToApprove: DemoMember) {
@@ -2388,14 +2496,16 @@ export default function Home() {
                 <span className="absolute right-2 top-2 size-2 rounded-full bg-[var(--pink)]" />
               )}
             </button>
-            <button
-              className="flex items-center gap-2 rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
-              type="button"
-              onClick={() => setBookingOpen(true)}
-            >
-              <Plus aria-hidden="true" className="size-4" />
-              {isCoach ? "Add" : "Book"}
-            </button>
+            {!isMissionControl && (
+              <button
+                className="flex items-center gap-2 rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                type="button"
+                onClick={() => setBookingOpen(true)}
+              >
+                <Plus aria-hidden="true" className="size-4" />
+                {isCoach ? "Add" : "Book"}
+              </button>
+            )}
             <button
               className="flex size-10 items-center justify-center rounded-md border border-[var(--line)] text-[var(--muted)] hover:border-[var(--pink)] hover:text-white"
               type="button"
@@ -2463,6 +2573,25 @@ export default function Home() {
                   </div>
                 </div>
 
+                <button
+                  className={`mb-3 w-full rounded-lg border p-3 text-left ${
+                    isMissionControl
+                      ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)]"
+                      : "border-[var(--line)] bg-black/20 hover:border-[var(--mint)]"
+                  }`}
+                  type="button"
+                  onClick={() => {
+                    setCoachMode("mission");
+                    setSelectedSlot(null);
+                    setMessage("Mission control ready.");
+                  }}
+                >
+                  <div className="font-medium">Mission control</div>
+                  <div className="mt-1 text-xs text-[var(--muted)]">
+                    Studio calendar and closures
+                  </div>
+                </button>
+
                 <div className="grid max-h-96 gap-2 overflow-y-auto pr-1">
                   {members.map((demoMember) => {
                     const isSelected = demoMember.id === activeMember.id;
@@ -2477,6 +2606,7 @@ export default function Home() {
                         key={demoMember.id}
                         type="button"
                         onClick={() => {
+                          setCoachMode("member");
                           setSelectedMemberId(demoMember.id);
                           setSelectedSlot(null);
                           setCoachRegularSlotForm((current) => ({
@@ -2537,6 +2667,7 @@ export default function Home() {
             )}
           </section>
 
+          {(!isCoach || coachMode === "member") && (
           <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
@@ -2653,6 +2784,7 @@ export default function Home() {
                 ))}
             </div>
           </section>
+          )}
 
           {!isCoach && (
             <>
@@ -2756,23 +2888,31 @@ export default function Home() {
             <div>
               <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
                 <UsersRound aria-hidden="true" className="size-4" />
-                {isCoach ? "Coach schedule" : "Member schedule"}
+                {isMissionControl
+                  ? "Mission control"
+                  : isCoach
+                    ? "Coach schedule"
+                    : "Member schedule"}
               </div>
               <h2 className="mt-1 text-2xl font-semibold">
-                {isCoach
+                {isMissionControl
+                  ? "Studio calendar"
+                  : isCoach
                   ? coachDayIsToday
                     ? "Today's sessions"
                     : "Day sessions"
                   : "Week schedule"}
               </h2>
               <p className="mt-1 text-sm text-[var(--muted)]">
-                {isCoach
+                {isMissionControl
+                  ? `${weekRangeLabel(weekOffset)} · ${weekBookingCount}/${weekCapacity} booked. ${message}`
+                  : isCoach
                   ? `${bookingLabel(coachDay)} · ${coachDayBookingCount}/${coachDayCapacity} booked · Managing ${activeMemberFullName}. ${message}`
                   : message}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {isCoach && (
+              {isCoach && !isMissionControl && (
                 <button
                   className="rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
                   type="button"
@@ -2807,7 +2947,7 @@ export default function Home() {
             </div>
           </div>
 
-          {isCoach && (
+          {isCoach && !isMissionControl && (
             <div className="grid grid-cols-5 gap-2 border-b border-[var(--line)] p-4">
               {week.map((day, dayIndex) => {
                 const isSelected = dayIndex === coachDayIndex;
@@ -2848,17 +2988,40 @@ export default function Home() {
                     {bookingLabel(selectedDetails.day)} at {selectedDetails.slot.time}
                   </h3>
                   <p className="mt-1 text-sm text-[var(--muted)]">
-                    {isCoach
+                    {isMissionControl
+                      ? selectedDetails.slot.closed
+                        ? "Closed"
+                        : selectedDetails.slot.names.length > 0
+                          ? selectedDetails.slot.names.join(", ")
+                          : "Open"
+                      : isCoach
                       ? selectedDetails.slot.names.length > 0
                         ? selectedDetails.slot.names.join(", ")
                         : "Open"
+                      : slotState(selectedDetails.slot, activeMember) === "closed"
+                        ? "Closed"
                       : slotState(selectedDetails.slot, activeMember) === "mine"
                         ? "Your booking"
                         : `${bookingRules.slotCapacity - selectedDetails.slot.names.length} spots available`}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {slotState(selectedDetails.slot, activeMember) === "mine" && (
+                  {isMissionControl && !selectedDetails.slot.closed && (
+                    <button
+                      className="rounded-md border border-[rgba(255,78,184,0.55)] px-3 py-2 text-sm text-[var(--pink)] hover:bg-[rgba(255,78,184,0.1)]"
+                      type="button"
+                      onClick={() =>
+                        requestCloseSlot(
+                          selectedDetails.dayIndex,
+                          selectedDetails.slotIndex,
+                        )
+                      }
+                    >
+                      Close slot
+                    </button>
+                  )}
+                  {!isMissionControl &&
+                    slotState(selectedDetails.slot, activeMember) === "mine" && (
                     <button
                       className="rounded-md border border-[rgba(255,78,184,0.55)] px-3 py-2 text-sm text-[var(--pink)] hover:bg-[rgba(255,78,184,0.1)]"
                       type="button"
@@ -2869,7 +3032,8 @@ export default function Home() {
                       Cancel
                     </button>
                   )}
-                  {slotState(selectedDetails.slot, activeMember) ===
+                  {!isMissionControl &&
+                    slotState(selectedDetails.slot, activeMember) ===
                     "available" && (
                     <button
                       className="rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
@@ -2881,7 +3045,8 @@ export default function Home() {
                       {isCoach ? `Add ${activeMember.firstName}` : "Book spot"}
                     </button>
                   )}
-                  {slotState(selectedDetails.slot, activeMember) === "full" &&
+                  {!isMissionControl &&
+                    slotState(selectedDetails.slot, activeMember) === "full" &&
                     isCoach && (
                     <button
                       className="rounded-md bg-[var(--orange)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
@@ -2895,7 +3060,8 @@ export default function Home() {
                       Override add
                     </button>
                   )}
-                  {slotState(selectedDetails.slot, activeMember) === "full" &&
+                  {!isMissionControl &&
+                    slotState(selectedDetails.slot, activeMember) === "full" &&
                     !isCoach && (
                     <button
                       className="rounded-md border border-[var(--olive)] px-3 py-2 text-sm text-[var(--olive)] hover:bg-white/10"
@@ -2927,7 +3093,77 @@ export default function Home() {
             </div>
           )}
 
-          {isCoach ? (
+          {isMissionControl ? (
+            <div className="grid gap-3 p-4 lg:grid-cols-5">
+              {week.map((day, dayIndex) => (
+                <div className="min-w-0" key={day.isoDate}>
+                  <div className="mb-3 flex items-baseline justify-between gap-2">
+                    <h3 className="text-lg font-semibold">{day.day}</h3>
+                    <span className="text-sm text-[var(--muted)]">{day.date}</span>
+                  </div>
+                  <div className="grid gap-2">
+                    {day.slots.map((slot, slotIndex) => {
+                      const full = slot.names.length >= bookingRules.slotCapacity;
+                      const isSelected =
+                        selectedSlot?.weekOffset === weekOffset &&
+                        selectedSlot.dayIndex === dayIndex &&
+                        selectedSlot.slotIndex === slotIndex;
+
+                      return (
+                        <button
+                          className={`min-h-32 rounded-lg border p-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--mint)] ${
+                            isSelected
+                              ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)]"
+                              : slot.closed
+                                ? "border-[var(--line)] bg-black/30 text-[var(--muted)]"
+                                : full
+                                  ? "border-[rgba(255,78,184,0.55)] bg-[rgba(255,78,184,0.08)] hover:border-[var(--pink)]"
+                                  : "border-[var(--line)] bg-[var(--panel)] hover:border-[var(--orange)]"
+                          }`}
+                          key={`${day.isoDate}-${slot.time}`}
+                          type="button"
+                          onClick={() =>
+                            setSelectedSlot({ weekOffset, dayIndex, slotIndex })
+                          }
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-base font-semibold">{slot.time}</span>
+                            <span
+                              className={`rounded-md border px-2 py-1 text-xs ${
+                                slot.closed
+                                  ? "border-[var(--line)] text-[var(--muted)]"
+                                  : full
+                                    ? "border-[rgba(255,78,184,0.55)] text-[var(--pink)]"
+                                    : "border-[var(--line)] text-[var(--muted)]"
+                              }`}
+                            >
+                              {slot.closed ? "Closed" : `${slot.names.length}/4`}
+                            </span>
+                          </div>
+                          <div className="mt-3 flex min-h-12 flex-wrap gap-1.5">
+                            {slot.names.length > 0 ? (
+                              slot.names.map((name) => (
+                                <span
+                                  className="rounded-md border border-[var(--line)] bg-black/20 px-2 py-1 text-xs text-[var(--muted)]"
+                                  key={`${day.isoDate}-${slot.time}-${name}`}
+                                >
+                                  {name}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="rounded-md border border-[var(--line)] bg-black/20 px-2 py-1 text-xs text-[var(--muted)]">
+                                Open
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : isCoach ? (
             <div className="grid gap-3 p-4">
               {coachDay.slots.map((slot, slotIndex) => {
                 const state = slotState(slot, activeMember);
@@ -2945,6 +3181,8 @@ export default function Home() {
                     className={`rounded-lg border p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--mint)] ${
                       isSelected
                         ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)]"
+                        : state === "closed"
+                          ? "border-[var(--line)] bg-black/30 text-[var(--muted)]"
                         : state === "full"
                           ? "border-[rgba(255,78,184,0.55)] bg-[rgba(255,78,184,0.08)] hover:border-[var(--pink)]"
                           : "border-[var(--line)] bg-[var(--panel)] hover:border-[var(--orange)]"
@@ -2965,12 +3203,18 @@ export default function Home() {
                           <span className="text-xl font-semibold">{slot.time}</span>
                           <span
                             className={`rounded-md border px-2 py-1 text-xs ${
-                              state === "full"
+                              state === "closed"
+                                ? "border-[var(--line)] text-[var(--muted)]"
+                                : state === "full"
                                 ? "border-[rgba(255,78,184,0.55)] text-[var(--pink)]"
                                 : "border-[var(--line)] text-[var(--muted)]"
                             }`}
                           >
-                            {state === "full" ? "Full" : `${spotsLeft} open`}
+                            {state === "closed"
+                              ? "Closed"
+                              : state === "full"
+                                ? "Full"
+                                : `${spotsLeft} open`}
                           </span>
                         </div>
                         <div className="mt-1 text-sm text-[var(--muted)]">
@@ -3032,11 +3276,17 @@ export default function Home() {
                           <div className="flex items-start justify-between gap-2">
                             <span className="text-base font-semibold">{slot.time}</span>
                             <span className="text-xs text-[var(--muted)]">
-                              {state === "full" ? "Waitlist" : `${spotsLeft} spots`}
+                              {state === "closed"
+                                ? "Closed"
+                                : state === "full"
+                                  ? "Waitlist"
+                                  : `${spotsLeft} spots`}
                             </span>
                           </div>
                           <div className="mt-3 min-h-10 text-sm text-[var(--muted)]">
-                            {state === "mine"
+                            {state === "closed"
+                              ? "Unavailable"
+                              : state === "mine"
                               ? "Your booking"
                               : state === "full"
                                 ? "Full"
@@ -3184,6 +3434,83 @@ export default function Home() {
               Submit request
             </button>
           </form>
+        </div>
+      )}
+
+      {slotClosurePrompt && (
+        <div className="fixed inset-0 z-40 flex items-end bg-black/70 p-4 sm:items-center sm:justify-center">
+          <div className="w-full max-w-lg rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm text-[var(--muted)]">Slot closure</p>
+                <h2 className="mt-1 text-lg font-semibold">
+                  Close {bookingLabel(week[slotClosurePrompt.dayIndex])} at{" "}
+                  {week[slotClosurePrompt.dayIndex]?.slots[slotClosurePrompt.slotIndex]
+                    ?.time ?? ""}
+                  ?
+                </h2>
+              </div>
+              <button
+                className="flex size-10 items-center justify-center rounded-md text-[var(--muted)] hover:bg-white/10 hover:text-white"
+                type="button"
+                aria-label="Cancel slot closure"
+                title="Cancel"
+                onClick={() => setSlotClosurePrompt(null)}
+              >
+                <X aria-hidden="true" className="size-5" />
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-[rgba(255,78,184,0.45)] bg-[rgba(255,78,184,0.08)] p-3">
+              <div className="flex items-start gap-2 text-sm">
+                <AlertTriangle
+                  aria-hidden="true"
+                  className="mt-0.5 size-4 shrink-0 text-[var(--pink)]"
+                />
+                <div>
+                  <div className="font-medium">This slot has bookings.</div>
+                  <div className="mt-1 text-[var(--muted)]">
+                    Closing it will cancel these bookings, issue closure credits, and
+                    email the booked members.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {slotClosurePrompt.names.map((name) => (
+                <span
+                  className="rounded-md border border-[var(--line)] bg-black/20 px-2 py-1 text-sm text-[var(--muted)]"
+                  key={name}
+                >
+                  {name}
+                </span>
+              ))}
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <button
+                className="flex-1 rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
+                type="button"
+                onClick={() => setSlotClosurePrompt(null)}
+              >
+                Keep open
+              </button>
+              <button
+                className="flex-1 rounded-md bg-[var(--pink)] px-3 py-2 text-sm font-semibold text-white hover:bg-white hover:text-[#01161c]"
+                type="button"
+                onClick={() =>
+                  closeStudioSlot(
+                    slotClosurePrompt.dayIndex,
+                    slotClosurePrompt.slotIndex,
+                    true,
+                  )
+                }
+              >
+                Close and notify
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

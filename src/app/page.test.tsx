@@ -127,10 +127,9 @@ describe("demo coach journey", () => {
 
     await user.click(screen.getByRole("button", { name: /Preview coach/ }));
 
-    expect(screen.getByText("Coach schedule")).toBeTruthy();
-    expect(screen.getByText("Today's sessions")).toBeTruthy();
-    expect(screen.getByText(/Thu 9 Jul · 5\/20 booked/)).toBeTruthy();
-    expect(screen.getByText(/Coach managed for Maddie Cannon/)).toBeTruthy();
+    expect(screen.getAllByText("Mission control").length).toBeGreaterThan(0);
+    expect(screen.getByText("Studio calendar")).toBeTruthy();
+    expect(screen.queryByText(/Coach managed for Maddie Cannon/)).toBeNull();
     expect(screen.getByText("Coaches: Ben, Manu, Ennor, Mel")).toBeTruthy();
     expect(screen.getByText("3 total")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Emma Richierich/ })).toBeTruthy();
@@ -139,12 +138,23 @@ describe("demo coach journey", () => {
       screen.getByRole("button", { name: /07:00.*Maddie.*Gemma/ }),
     ).toBeTruthy();
     expect(
-      screen.queryByRole("button", {
+      screen.getByRole("button", {
         name: /07:00.*Emma.*Gemma.*Reserved.*Drop-in/,
       }),
-    ).toBeNull();
+    ).toBeTruthy();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: /07:00.*Emma.*Gemma.*Reserved.*Drop-in/,
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Close slot" }));
+    expect(screen.getByText("This slot has bookings.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Keep open" }));
 
     await user.click(screen.getByRole("button", { name: /Emma Richierich/ }));
+    expect(screen.getByText("Coach schedule")).toBeTruthy();
+    expect(screen.getByText("Today's sessions")).toBeTruthy();
     expect(screen.getByText(/Managing Emma Richierich/)).toBeTruthy();
     expect(screen.getByText(/Coach managed for Emma Richierich/)).toBeTruthy();
 

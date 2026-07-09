@@ -12,6 +12,7 @@ type CorrespondenceKind =
   | "weekly-quota-updated"
   | "booking-created"
   | "booking-cancelled"
+  | "slot-closed"
   | "waitlist-joined"
   | "waitlist-left";
 
@@ -64,6 +65,7 @@ const kindLabels: Record<CorrespondenceKind, string> = {
   "weekly-quota-updated": "Weekly entitlement updated",
   "booking-created": "Booking created",
   "booking-cancelled": "Booking cancelled",
+  "slot-closed": "Session closed",
   "waitlist-joined": "Waitlist joined",
   "waitlist-left": "Waitlist left",
 };
@@ -261,6 +263,32 @@ export function buildCorrespondenceEmail(event: CorrespondenceEvent) {
             ${htmlRows}
           </table>
           <p style="margin:18px 0 0"><a href="${escapeHtml(event.reviewLink ?? "")}" style="display:inline-block;border-radius:6px;background:#00ffb8;color:#01161c;font-weight:700;padding:10px 14px;text-decoration:none">Review signup</a></p>
+        </div>
+      `,
+    } satisfies BuiltCorrespondenceEmail;
+  }
+
+  if (event.kind === "slot-closed") {
+    return {
+      subject: "[FEL Booking] Session closed",
+      text: [
+        "A Fit East London session you were booked for has been closed.",
+        "",
+        event.bookingDate ? `Date: ${event.bookingDate}` : "",
+        event.time ? `Time: ${event.time}` : "",
+        "",
+        "A closure credit has been added to your booking account.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.5;color:#09242c">
+          <h1 style="font-size:20px;margin:0 0 12px">Session closed</h1>
+          <p style="margin:0 0 16px">A Fit East London session you were booked for has been closed.</p>
+          <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;max-width:640px">
+            ${htmlRows}
+          </table>
+          <p style="margin:18px 0 0;color:#49666e">A closure credit has been added to your booking account.</p>
         </div>
       `,
     } satisfies BuiltCorrespondenceEmail;

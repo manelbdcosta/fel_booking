@@ -145,6 +145,8 @@ The current demo journeys covered by tests are:
 - Regular recurring slots are coach-managed only. Members may submit change requests, but they cannot create or edit recurring slots themselves.
 - Regular slot change requests record both the current slot being abandoned and the requested new slot.
 - Recurring regular slot assignment is capped at four members per weekday/time slot.
+- Coaches have a mission-control calendar for studio-level slot visibility and can close individual dated time slots.
+- Closing an occupied slot cancels those bookings, issues closure credits, and emails the booked members.
 - Coach-approved future recurring-slot changes replace future materialized regular bookings without generating credits.
 - Dashboard counters are lifetime totals.
 - Archiving a member cancels future bookings, removes recurring slots, clears waitlists, and preserves history.
