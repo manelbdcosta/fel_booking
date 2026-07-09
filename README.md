@@ -67,6 +67,8 @@ The repository includes a GitHub Actions workflow at `.github/workflows/pages.ym
 
 That means the GitHub Pages version is useful for showing the interface, but real outbound email requires a server runtime such as Vercel, Netlify, Cloudflare Workers, or Supabase Edge Functions.
 
+On GitHub Free, Pages requires a public repository. Private repository Pages requires a paid plan that supports private Pages.
+
 ## Database
 
 The initial schema is in `supabase/migrations/20260709113000_initial_schema.sql`.
