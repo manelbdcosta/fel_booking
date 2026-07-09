@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { bookingRules } from "@/lib/booking-config";
 import { cleanText, requireDatabase } from "@/lib/database";
 import {
   forbiddenResponse,
@@ -139,6 +140,35 @@ export async function POST(request: Request, { params }: ReviewParams) {
     if (duplicate) {
       return NextResponse.json(
         { error: "The requested regular slot is already assigned." },
+        { status: 409 },
+      );
+    }
+
+    const requestedSlotCount = await db
+      .prepare(
+        `
+          select count(*) as count
+          from recurring_slots
+          join members on members.id = recurring_slots.member_id
+          where
+            recurring_slots.member_id <> ?1
+            and recurring_slots.weekday = ?2
+            and recurring_slots.start_time = ?3
+            and recurring_slots.effective_until is null
+            and members.role = 'member'
+            and members.status <> 'archived'
+        `,
+      )
+      .bind(
+        requestRow.member_id,
+        requestRow.requested_weekday,
+        requestRow.requested_start_time,
+      )
+      .first<{ count: number }>();
+
+    if (Number(requestedSlotCount?.count ?? 0) >= bookingRules.slotCapacity) {
+      return NextResponse.json(
+        { error: "The requested regular slot is full." },
         { status: 409 },
       );
     }

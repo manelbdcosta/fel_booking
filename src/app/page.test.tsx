@@ -151,6 +151,10 @@ describe("demo coach journey", () => {
     await user.click(screen.getByRole("button", { name: /Maddie Cannon/ }));
     await user.click(screen.getByRole("button", { name: "Manage regular slots" }));
     expect(screen.getByText(/2\/2 assigned for Maddie Cannon/)).toBeTruthy();
+    expect(screen.getByText("Slot availability")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Friday 08:00 1/4 assigned" }),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Add session" })).toBeDisabled();
 

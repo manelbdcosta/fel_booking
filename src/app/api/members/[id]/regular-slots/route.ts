@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { bookingRules } from "@/lib/booking-config";
 import { cleanText, createId, requireDatabase } from "@/lib/database";
 import { forbiddenResponse, getSessionUser, unauthorizedResponse } from "@/lib/server-auth";
 
@@ -105,6 +106,48 @@ export async function PUT(request: Request, { params }: MemberRegularSlotParams)
   }
 
   const memberId = cleanText(id, 120);
+  const occupancyRows = (
+    await db
+      .prepare(
+        `
+          select
+            recurring_slots.weekday,
+            recurring_slots.start_time,
+            count(*) as count
+          from recurring_slots
+          join members on members.id = recurring_slots.member_id
+          where
+            recurring_slots.member_id <> ?1
+            and recurring_slots.effective_until is null
+            and members.role = 'member'
+            and members.status <> 'archived'
+          group by recurring_slots.weekday, recurring_slots.start_time
+        `,
+      )
+      .bind(memberId)
+      .all<{ weekday: number; start_time: string; count: number }>()
+  ).results;
+  const occupancyBySlot = new Map(
+    occupancyRows.map((row) => [
+      `${row.weekday}:${row.start_time}`,
+      Number(row.count),
+    ]),
+  );
+
+  for (const slot of slots) {
+    const weekday = weekdayNumbers[slot.day];
+    const assigned =
+      Number(occupancyBySlot.get(`${weekday}:${slot.time}`) ?? 0) + 1;
+
+    if (assigned > bookingRules.slotCapacity) {
+      return NextResponse.json(
+        {
+          error: `${slot.day} ${slot.time} is full (${bookingRules.slotCapacity}/${bookingRules.slotCapacity}).`,
+        },
+        { status: 400 },
+      );
+    }
+  }
 
   const statements = [
     db

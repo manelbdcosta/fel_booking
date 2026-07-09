@@ -589,6 +589,56 @@ export default function Home() {
   const regularSlotDraftChanged =
     weeklyQuotaDraft !== activeWeeklyQuota ||
     regularSlotSignature(regularSlotDrafts) !== regularSlotSignature(regularSlots);
+  const regularSlotCapacity = bookingRules.slotCapacity;
+
+  function regularSlotOccupancy(
+    day: string,
+    time: string,
+    options: { excludeDraftSlotId?: string } = {},
+  ) {
+    const otherMemberCount = Object.entries(regularSlotsByMember).reduce(
+      (count, [memberId, slots]) => {
+        if (memberId === activeMember.id) {
+          return count;
+        }
+
+        const countedMember = members.find(
+          (currentMember) => currentMember.id === memberId,
+        );
+
+        if (!countedMember) {
+          return count;
+        }
+
+        return (
+          count +
+          slots.filter((slot) => slot.day === day && slot.time === time).length
+        );
+      },
+      0,
+    );
+    const draftCount = regularSlotDrafts.filter(
+      (slot) =>
+        slot.id !== options.excludeDraftSlotId &&
+        slot.day === day &&
+        slot.time === time,
+    ).length;
+
+    return otherMemberCount + draftCount;
+  }
+
+  function regularSlotAvailability(
+    day: string,
+    time: string,
+    options: { excludeDraftSlotId?: string } = {},
+  ) {
+    const assigned = regularSlotOccupancy(day, time, options);
+
+    return {
+      assigned,
+      remaining: Math.max(0, regularSlotCapacity - assigned),
+    };
+  }
 
   const week = weeks[weekOffset] ?? buildWeek(weekOffset);
   const coachDay = week[coachDayIndex] ?? week[0];
@@ -1307,6 +1357,17 @@ export default function Home() {
       return;
     }
 
+    const availability = regularSlotAvailability(updatedSlot.day, updatedSlot.time, {
+      excludeDraftSlotId: slotId,
+    });
+
+    if (availability.remaining <= 0) {
+      setRegularSlotDraftNotice(
+        `${updatedSlot.day} ${updatedSlot.time} is full (${availability.assigned}/${regularSlotCapacity}).`,
+      );
+      return;
+    }
+
     setRegularSlotDrafts((drafts) =>
       drafts.map((slot) =>
         slot.id === slotId ? { ...slot, ...updatedSlot } : slot,
@@ -1333,6 +1394,18 @@ export default function Home() {
     if (regularSlotDrafts.some((slot) => sameRegularSlot(slot, coachRegularSlotForm))) {
       setRegularSlotDraftNotice(
         `${activeMemberFullName} already has ${coachRegularSlotForm.day} ${coachRegularSlotForm.time}.`,
+      );
+      return;
+    }
+
+    const availability = regularSlotAvailability(
+      coachRegularSlotForm.day,
+      coachRegularSlotForm.time,
+    );
+
+    if (availability.remaining <= 0) {
+      setRegularSlotDraftNotice(
+        `${coachRegularSlotForm.day} ${coachRegularSlotForm.time} is full (${availability.assigned}/${regularSlotCapacity}).`,
       );
       return;
     }
@@ -3169,6 +3242,66 @@ export default function Home() {
                 {regularSlotDraftNotice}
               </p>
             )}
+
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold">Slot availability</h3>
+                <div className="text-xs text-[var(--muted)]">
+                  Assigned / {regularSlotCapacity}
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-5">
+                {weekdayOptions.map((day) => (
+                  <div
+                    className="rounded-lg border border-[var(--line)] bg-black/20 p-2"
+                    key={day}
+                  >
+                    <div className="mb-2 text-xs font-semibold uppercase text-[var(--muted)]">
+                      {day}
+                    </div>
+                    <div className="space-y-1">
+                      {bookingRules.slotTimes.map((time) => {
+                        const availability = regularSlotAvailability(day, time);
+                        const selected =
+                          coachRegularSlotForm.day === day &&
+                          coachRegularSlotForm.time === time;
+                        const full = availability.remaining <= 0;
+
+                        return (
+                          <button
+                            aria-label={`${day} ${time} ${availability.assigned}/${regularSlotCapacity} assigned`}
+                            className={`flex min-h-9 w-full items-center justify-between rounded-md border px-2 text-xs transition-colors ${
+                              selected
+                                ? "border-[var(--mint)] bg-[rgba(0,255,184,0.16)] text-white"
+                                : full
+                                  ? "border-[rgba(255,78,184,0.45)] bg-[rgba(255,78,184,0.08)] text-[var(--muted)]"
+                                  : "border-[var(--line)] bg-[#09242c] text-white hover:border-[var(--mint)]"
+                            }`}
+                            key={time}
+                            type="button"
+                            disabled={full}
+                            onClick={() =>
+                              setCoachRegularSlotForm((current) => ({
+                                ...current,
+                                day,
+                                time,
+                              }))
+                            }
+                          >
+                            <span>{time}</span>
+                            <span
+                              className={full ? "text-[var(--pink)]" : "text-[var(--mint)]"}
+                            >
+                              {availability.assigned}/{regularSlotCapacity}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
             <div className="mt-4 space-y-2">
               {regularSlotDrafts.map((slot) => (
