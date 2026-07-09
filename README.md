@@ -53,7 +53,7 @@ supabase start
 supabase db reset
 ```
 
-The seed data in `supabase/seed.sql` creates one coach, ten members, recurring slots, and two weeks of materialized bookings. Seed identities use unique `manu+...@intentionalsets.com` addresses so local auth remains compatible with the database's unique email rule.
+The seed data in `supabase/seed.sql` creates four coaches, three members, recurring slots, and two weeks of materialized bookings. Seed identities use unique `manu+...@intentionalsets.com` addresses so local auth remains compatible with the database's unique email rule.
 
 ## Business Rules
 

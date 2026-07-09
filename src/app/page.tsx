@@ -110,30 +110,33 @@ type DemoMember = {
 };
 
 const member: DemoMember = {
-  id: "amira",
-  firstName: "Amira",
-  lastName: "Khan",
+  id: "maddie",
+  firstName: "Maddie",
+  lastName: "Cannon",
   weeklyQuota: 2,
   status: "active",
 };
 
 const demoMembers: DemoMember[] = [
   member,
-  { id: "ben", firstName: "Ben", lastName: "Taylor", weeklyQuota: 1, status: "active" },
-  { id: "cara", firstName: "Cara", lastName: "Morgan", weeklyQuota: 3, status: "active" },
-  { id: "dev", firstName: "Dev", lastName: "Patel", weeklyQuota: 2, status: "active" },
-  { id: "ella", firstName: "Ella", lastName: "Reed", weeklyQuota: 1, status: "active" },
-  { id: "finn", firstName: "Finn", lastName: "Osei", weeklyQuota: 2, status: "active" },
-  { id: "gia", firstName: "Gia", lastName: "Lewis", weeklyQuota: 3, status: "active" },
-  { id: "hugo", firstName: "Hugo", lastName: "Wright", weeklyQuota: 1, status: "pending" },
-  { id: "iris", firstName: "Iris", lastName: "Stone", weeklyQuota: 2, status: "active" },
-  { id: "jonah", firstName: "Jonah", lastName: "Bell", weeklyQuota: 1, status: "active" },
+  {
+    id: "emma",
+    firstName: "Emma",
+    lastName: "Richierich",
+    weeklyQuota: 2,
+    status: "active",
+  },
+  {
+    id: "gemma",
+    firstName: "Gemma",
+    lastName: "Partridge",
+    weeklyQuota: 3,
+    status: "active",
+  },
 ];
 
-const coach = {
-  firstName: "Fit East",
-  lastName: "Coach",
-};
+const demoCoaches = ["Ben", "Manu", "Ennor", "Mel"];
+const demoCoachNames = demoCoaches.join(", ");
 
 const correspondenceEmail = "manu@intentionalsets.com";
 
@@ -185,39 +188,22 @@ const initialRegularSlots: RegularSlot[] = [
 ];
 
 const initialRegularSlotsByMember: Record<string, RegularSlot[]> = {
-  amira: initialRegularSlots,
-  ben: [{ id: "regular-ben-1", day: "Tuesday", time: "08:00" }],
-  cara: [
-    { id: "regular-cara-1", day: "Monday", time: "07:30" },
-    { id: "regular-cara-2", day: "Wednesday", time: "07:30" },
-    { id: "regular-cara-3", day: "Friday", time: "08:30" },
+  maddie: initialRegularSlots,
+  emma: [
+    { id: "regular-emma-1", day: "Tuesday", time: "08:00" },
+    { id: "regular-emma-2", day: "Friday", time: "07:00" },
   ],
-  dev: [
-    { id: "regular-dev-1", day: "Tuesday", time: "07:00" },
-    { id: "regular-dev-2", day: "Thursday", time: "08:00" },
+  gemma: [
+    { id: "regular-gemma-1", day: "Monday", time: "07:30" },
+    { id: "regular-gemma-2", day: "Wednesday", time: "06:30" },
+    { id: "regular-gemma-3", day: "Friday", time: "08:00" },
   ],
-  ella: [{ id: "regular-ella-1", day: "Friday", time: "06:30" }],
-  finn: [
-    { id: "regular-finn-1", day: "Monday", time: "08:00" },
-    { id: "regular-finn-2", day: "Wednesday", time: "06:30" },
-  ],
-  gia: [
-    { id: "regular-gia-1", day: "Tuesday", time: "06:30" },
-    { id: "regular-gia-2", day: "Wednesday", time: "08:30" },
-    { id: "regular-gia-3", day: "Friday", time: "07:00" },
-  ],
-  hugo: [],
-  iris: [
-    { id: "regular-iris-1", day: "Monday", time: "08:30" },
-    { id: "regular-iris-2", day: "Thursday", time: "06:30" },
-  ],
-  jonah: [{ id: "regular-jonah-1", day: "Friday", time: "08:00" }],
 };
 
 const initialRegularSlotRequests: RegularSlotChangeRequest[] = [
   {
     id: "regular-request-1",
-    memberName: "Amira Khan",
+    memberName: "Maddie Cannon",
     requestedDay: "Tuesday",
     requestedTime: "07:30",
     effectiveWeek: "2026-07-20",
@@ -228,39 +214,39 @@ const initialRegularSlotRequests: RegularSlotChangeRequest[] = [
 
 const slotTemplates: Array<Array<Omit<ScheduleSlot, "time">>> = [
   [
-    { names: ["Amira", "Finn"] },
-    { names: ["Maya", "Tom", "Liv", "Noah"] },
-    { names: ["Cara"] },
-    { names: ["Finn", "Dev"] },
-    { names: ["Iris"] },
-  ],
-  [
-    { names: ["Gia"] },
-    { names: ["Dev"] },
-    { names: [] },
-    { names: ["Ben"] },
+    { names: ["Maddie", "Gemma"] },
+    { names: ["Emma", "Gemma", "Reserved", "Drop-in"] },
+    { names: ["Gemma"] },
+    { names: ["Emma"] },
     { names: [] },
   ],
   [
-    { names: ["Finn"] },
+    { names: ["Emma"] },
+    { names: ["Gemma"] },
     { names: [] },
-    { names: ["Cara", "Maya", "Sam"] },
-    { names: ["Liv", "Noah", "Oli", "Rae"] },
-    { names: ["Gia"] },
-  ],
-  [
-    { names: ["Iris"] },
-    { names: ["Amira", "Dev"] },
-    { names: ["Oli"] },
-    { names: ["Dev"] },
+    { names: ["Emma"] },
     { names: [] },
   ],
   [
-    { names: ["Ella"] },
-    { names: ["Gia"] },
+    { names: ["Gemma"] },
     { names: [] },
-    { names: ["Jonah"] },
-    { names: ["Amira", "Cara"] },
+    { names: ["Maddie", "Emma"] },
+    { names: ["Reserved", "Drop-in"] },
+    { names: ["Gemma"] },
+  ],
+  [
+    { names: ["Emma"] },
+    { names: ["Maddie", "Gemma"] },
+    { names: ["Reserved"] },
+    { names: ["Emma"] },
+    { names: [] },
+  ],
+  [
+    { names: ["Gemma"] },
+    { names: ["Emma"] },
+    { names: [] },
+    { names: ["Gemma"] },
+    { names: ["Maddie", "Emma"] },
   ],
 ];
 
@@ -395,7 +381,7 @@ export default function Home() {
     });
   const [coachRegularSlotForm, setCoachRegularSlotForm] =
     useState<CoachRegularSlotForm>({
-      memberName: "Amira Khan",
+      memberName: "Maddie Cannon",
       day: "Tuesday",
       time: "07:30",
       effectiveWeek: "2026-07-20",
@@ -769,7 +755,7 @@ export default function Home() {
               >
                 <UsersRound aria-hidden="true" className="mb-4 size-5 text-[var(--mint)]" />
                 <div className="font-semibold">Demo member</div>
-                <div className="mt-1 text-sm text-[var(--muted)]">Amira Khan</div>
+                <div className="mt-1 text-sm text-[var(--muted)]">Maddie Cannon</div>
               </button>
               <button
                 className="rounded-lg border border-[var(--orange)] bg-[rgba(255,138,31,0.1)] p-4 text-left hover:bg-[rgba(255,138,31,0.16)]"
@@ -781,9 +767,7 @@ export default function Home() {
                   className="mb-4 size-5 text-[var(--orange)]"
                 />
                 <div className="font-semibold">Demo coach</div>
-                <div className="mt-1 text-sm text-[var(--muted)]">
-                  {coach.firstName} {coach.lastName}
-                </div>
+                <div className="mt-1 text-sm text-[var(--muted)]">{demoCoachNames}</div>
               </button>
             </div>
           </section>
@@ -1018,6 +1002,9 @@ export default function Home() {
                   <div>
                     <p className="text-sm text-[var(--muted)]">Coach dashboard</p>
                     <h2 className="mt-1 text-2xl font-semibold">Members</h2>
+                    <p className="mt-1 text-xs text-[var(--muted)]">
+                      Coaches: {demoCoachNames}
+                    </p>
                   </div>
                   <div className="rounded-md border border-[var(--orange)] px-2 py-1 text-sm text-[var(--orange)]">
                     {demoMembers.length} total

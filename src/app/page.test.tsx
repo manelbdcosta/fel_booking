@@ -47,7 +47,7 @@ describe("demo member journey", () => {
 
     expect(screen.getByText("Member schedule")).toBeTruthy();
     expect(screen.getByText("Coach approval required")).toBeTruthy();
-    expect(screen.queryByText("Maya, Tom, Liv, Noah")).toBeNull();
+    expect(screen.queryByText("Emma, Gemma, Reserved, Drop-in")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Request change" }));
     await user.selectOptions(screen.getByLabelText("Day"), "Friday");
@@ -67,7 +67,7 @@ describe("demo member journey", () => {
     await user.click(screen.getByRole("button", { name: "Book spot" }));
 
     expect(
-      screen.getByText("Makeup booked for Amira Khan on Mon 13 Jul at 07:30."),
+      screen.getByText("Makeup booked for Maddie Cannon on Mon 13 Jul at 07:30."),
     ).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /06:30.*Your booking/ }));
@@ -85,7 +85,7 @@ describe("demo member journey", () => {
     await user.click(screen.getByRole("button", { name: "Join waitlist" }));
 
     expect(
-      screen.getByText("Joined waitlist for Amira Khan on Mon 13 Jul at 07:00."),
+      screen.getByText("Joined waitlist for Maddie Cannon on Mon 13 Jul at 07:00."),
     ).toBeTruthy();
     const waitlistSection = screen.getByRole("heading", { name: "Waitlist" })
       .parentElement?.parentElement;
@@ -102,40 +102,43 @@ describe("demo coach journey", () => {
     await user.click(screen.getByRole("button", { name: /Demo coach/ }));
 
     expect(screen.getByText("Coach schedule")).toBeTruthy();
-    expect(screen.getByText("Coach managed for Amira Khan")).toBeTruthy();
-    expect(screen.getByText("10 total")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Ben Taylor/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Jonah Bell/ })).toBeTruthy();
-    expect(screen.getByText("Maya, Tom, Liv, Noah")).toBeTruthy();
+    expect(screen.getByText("Coach managed for Maddie Cannon")).toBeTruthy();
+    expect(screen.getByText("Coaches: Ben, Manu, Ennor, Mel")).toBeTruthy();
+    expect(screen.getByText("3 total")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Emma Richierich/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Gemma Partridge/ })).toBeTruthy();
+    expect(screen.getByText("Emma, Gemma, Reserved, Drop-in")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: /Ben Taylor/ }));
-    expect(screen.getByText(/Managing Ben Taylor/)).toBeTruthy();
-    expect(screen.getByText("Coach managed for Ben Taylor")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Emma Richierich/ }));
+    expect(screen.getByText(/Managing Emma Richierich/)).toBeTruthy();
+    expect(screen.getByText("Coach managed for Emma Richierich")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: /Amira Khan/ }));
+    await user.click(screen.getByRole("button", { name: /Maddie Cannon/ }));
     await user.click(screen.getByRole("button", { name: "Assign regular slot" }));
     await user.selectOptions(screen.getByLabelText("Day"), "Friday");
     await user.selectOptions(screen.getByLabelText("Time"), "08:30");
     await user.click(screen.getByRole("button", { name: "Assign slot" }));
 
     expect(
-      screen.getByText(/Coach assigned Amira Khan to Friday 08:30 from Mon 20 Jul/),
+      screen.getByText(/Coach assigned Maddie Cannon to Friday 08:30 from Mon 20 Jul/),
     ).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Approve" }));
 
     expect(
-      screen.getByText(/Approved Amira Khan's regular slot request for Tuesday 07:30/),
+      screen.getByText(/Approved Maddie Cannon's regular slot request for Tuesday 07:30/),
     ).toBeTruthy();
     expect(screen.getByText("approved")).toBeTruthy();
 
     await user.click(
-      screen.getByRole("button", { name: /07:00.*Maya, Tom, Liv, Noah/ }),
+      screen.getByRole("button", {
+        name: /07:00.*Emma, Gemma, Reserved, Drop-in/,
+      }),
     );
     await user.click(screen.getByRole("button", { name: "Override add" }));
 
     expect(
-      screen.getByText(/Coach override booked Amira Khan for Mon 13 Jul at 07:00/),
+      screen.getByText(/Coach override booked Maddie Cannon for Mon 13 Jul at 07:00/),
     ).toBeTruthy();
   });
 });
