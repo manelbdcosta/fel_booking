@@ -13,6 +13,7 @@ export function cleanSignupPayload(value: unknown) {
     lastName: cleanText(record.lastName, 80),
     email: normalizeEmail(record.email),
     phone: cleanText(record.phone, 80),
+    password: typeof record.password === "string" ? record.password : "",
   };
 }
 

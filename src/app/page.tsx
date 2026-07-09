@@ -28,7 +28,7 @@ import { publicAppPath } from "@/lib/public-url";
 
 type SlotState = "available" | "mine" | "full";
 type DemoRole = "member" | "coach";
-type AuthMode = "sign-in" | "register";
+type AuthMode = "sign-in" | "register" | "forgot-password" | "reset-password";
 
 type ScheduleSlot = {
   memberIds?: string[];
@@ -105,6 +105,20 @@ type RegistrationForm = {
   lastName: string;
   email: string;
   phone: string;
+  password: string;
+  passwordConfirm: string;
+};
+
+type PendingRegistration = Pick<
+  RegistrationForm,
+  "firstName" | "lastName" | "email" | "phone"
+>;
+
+type ResetPasswordForm = {
+  email: string;
+  token: string;
+  password: string;
+  passwordConfirm: string;
 };
 
 type DemoMember = {
@@ -491,6 +505,7 @@ export default function Home() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
   const [signInEmail, setSignInEmail] = useState("");
+  const [signInPassword, setSignInPassword] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [registration, setRegistration] = useState<RegistrationForm>({
@@ -498,9 +513,17 @@ export default function Home() {
     lastName: "",
     email: "",
     phone: "",
+    password: "",
+    passwordConfirm: "",
   });
   const [pendingRegistration, setPendingRegistration] =
-    useState<RegistrationForm | null>(null);
+    useState<PendingRegistration | null>(null);
+  const [resetPasswordForm, setResetPasswordForm] = useState<ResetPasswordForm>({
+    email: "",
+    token: "",
+    password: "",
+    passwordConfirm: "",
+  });
   const [members, setMembers] = useState<DemoMember[]>(demoMembers);
   const [coaches, setCoaches] = useState(demoCoaches);
   const [weekOffset, setWeekOffset] = useState(0);
@@ -665,6 +688,54 @@ export default function Home() {
     [applyScheduleData],
   );
 
+  const finishAuthenticatedSession = useCallback(
+    async (user: AuthUser, messagePrefix = "Signed in as") => {
+      setCurrentUser(user);
+      setCurrentRole(user.role);
+
+      if (user.role === "member") {
+        setSelectedMemberId(user.id);
+      }
+
+      const bootstrapResponse = await fetch(publicAppPath("/api/bootstrap"), {
+        headers: { Accept: "application/json" },
+      });
+      let bootstrapData: BootstrapData | null = null;
+
+      if (bootstrapResponse.ok) {
+        bootstrapData = (await bootstrapResponse.json()) as BootstrapData;
+        applyBootstrapData(bootstrapData);
+      }
+
+      const reviewMemberId = pendingReviewMemberId();
+      const reviewMember =
+        user.role === "coach" && reviewMemberId
+          ? bootstrapData?.members?.find(
+              (loadedMember) => loadedMember.id === reviewMemberId,
+            )
+          : null;
+      const scheduleMemberId =
+        reviewMember?.id ??
+        (user.role === "member" ? user.id : bootstrapData?.members?.[0]?.id);
+
+      if (scheduleMemberId) {
+        if (reviewMember) {
+          setSelectedMemberId(reviewMember.id);
+          clearPendingReviewMemberId(reviewMember.id);
+        }
+
+        void loadScheduleData(scheduleMemberId, 0);
+      }
+
+      setMessage(
+        reviewMember
+          ? `Reviewing ${fullName(reviewMember)}.`
+          : `${messagePrefix} ${user.firstName}.`,
+      );
+    },
+    [applyBootstrapData, loadScheduleData],
+  );
+
   useEffect(() => {
     let active = true;
 
@@ -779,100 +850,41 @@ export default function Home() {
 
     const params = new URLSearchParams(window.location.search);
     const token = params.get("token");
+    const resetToken = params.get("resetToken");
     const email = params.get("email");
 
     pendingReviewMemberId();
+
+    if (resetToken && email) {
+      async function preparePasswordReset() {
+        setResetPasswordForm((current) => ({
+          ...current,
+          email: email ?? "",
+          token: resetToken ?? "",
+        }));
+        setAuthMode("reset-password");
+        setAuthMessage("");
+      }
+
+      void preparePasswordReset();
+      return;
+    }
 
     if (!token || !email) {
       return;
     }
 
-    let active = true;
-
-    async function verifySignInLink() {
-      setAuthBusy(true);
-
-      try {
-        const response = await fetch(publicAppPath("/api/auth/verify"), {
-          body: JSON.stringify({ email, token }),
-          headers: { "Content-Type": "application/json" },
-          method: "POST",
-        });
-        const payload = (await response.json().catch(() => ({}))) as {
-          error?: string;
-          user?: AuthUser;
-        };
-
-        if (!active) {
-          return;
-        }
-
-        if (!response.ok || !payload.user) {
-          setAuthMessage(
-            payload.error ?? "This sign-in link is invalid or expired.",
-          );
-          return;
-        }
-
-        window.history.replaceState({}, "", window.location.pathname);
-        setCurrentUser(payload.user);
-        setCurrentRole(payload.user.role);
-
-        if (payload.user.role === "member") {
-          setSelectedMemberId(payload.user.id);
-        }
-
-        const bootstrapResponse = await fetch(publicAppPath("/api/bootstrap"), {
-          headers: { Accept: "application/json" },
-        });
-
-        let bootstrapData: BootstrapData | null = null;
-
-        if (bootstrapResponse.ok) {
-          bootstrapData = (await bootstrapResponse.json()) as BootstrapData;
-          applyBootstrapData(bootstrapData);
-        }
-
-        const reviewMemberId = pendingReviewMemberId();
-        const reviewMember =
-          payload.user.role === "coach" && reviewMemberId
-            ? bootstrapData?.members?.find(
-                (loadedMember) => loadedMember.id === reviewMemberId,
-              )
-            : null;
-        const scheduleMemberId =
-          reviewMember?.id ??
-          (payload.user.role === "member"
-            ? payload.user.id
-            : bootstrapData?.members?.[0]?.id);
-
-        if (scheduleMemberId) {
-          if (reviewMember) {
-            setSelectedMemberId(reviewMember.id);
-            clearPendingReviewMemberId(reviewMember.id);
-          }
-
-          void loadScheduleData(scheduleMemberId, 0);
-        }
-
-        setMessage(
-          reviewMember
-            ? `Reviewing ${fullName(reviewMember)}.`
-            : `Signed in as ${payload.user.firstName}.`,
-        );
-      } finally {
-        if (active) {
-          setAuthBusy(false);
-        }
-      }
+    async function showPasswordSignInMessage() {
+      setAuthMode("sign-in");
+      setSignInEmail(email ?? "");
+      setAuthMessage(
+        "Password sign-in is now required. Use Forgot password if you need to set one.",
+      );
+      window.history.replaceState({}, "", window.location.pathname);
     }
 
-    void verifySignInLink();
-
-    return () => {
-      active = false;
-    };
-  }, [applyBootstrapData, loadScheduleData]);
+    void showPasswordSignInMessage();
+  }, []);
 
   useEffect(() => {
     if (!appStateLoaded || currentUser) {
@@ -936,8 +948,38 @@ export default function Home() {
     setAuthMessage("");
 
     try {
-      const response = await fetch(publicAppPath("/api/auth/request-link"), {
-        body: JSON.stringify({ email: signInEmail }),
+      const response = await fetch(publicAppPath("/api/auth/login"), {
+        body: JSON.stringify({ email: signInEmail, password: signInPassword }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        user?: AuthUser;
+      };
+
+      if (!response.ok || !payload.user) {
+        setAuthMessage(
+          payload.error ??
+            "We could not sign you in. Please check your email and password.",
+        );
+        return;
+      }
+
+      await finishAuthenticatedSession(payload.user);
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function submitForgotPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthMessage("");
+
+    try {
+      const response = await fetch(publicAppPath("/api/auth/request-password-reset"), {
+        body: JSON.stringify({ email: resetPasswordForm.email }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
       });
@@ -947,13 +989,60 @@ export default function Home() {
 
       if (!response.ok) {
         setAuthMessage(
-          payload.error ??
-            "We could not send a sign-in link yet. Please try again shortly.",
+          payload.error ?? "We could not send a password reset email yet.",
         );
         return;
       }
 
-      setAuthMessage(`Sign-in link sent to ${signInEmail}.`);
+      setAuthMessage(
+        `Password reset email sent to ${resetPasswordForm.email}.`,
+      );
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function submitResetPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthMessage("");
+
+    if (resetPasswordForm.password !== resetPasswordForm.passwordConfirm) {
+      setAuthMessage("Passwords do not match.");
+      setAuthBusy(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(publicAppPath("/api/auth/reset-password"), {
+        body: JSON.stringify({
+          email: resetPasswordForm.email,
+          password: resetPasswordForm.password,
+          token: resetPasswordForm.token,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        user?: AuthUser | null;
+      };
+
+      if (!response.ok) {
+        setAuthMessage(payload.error ?? "Could not reset this password.");
+        return;
+      }
+
+      if (payload.user) {
+        window.history.replaceState({}, "", window.location.pathname);
+        await finishAuthenticatedSession(payload.user, "Password updated for");
+        return;
+      }
+
+      setAuthMode("sign-in");
+      setAuthMessage(
+        "Password updated. This account is still waiting for coach approval.",
+      );
     } finally {
       setAuthBusy(false);
     }
@@ -963,6 +1052,12 @@ export default function Home() {
     event.preventDefault();
     setAuthBusy(true);
     setAuthMessage("");
+
+    if (registration.password !== registration.passwordConfirm) {
+      setAuthMessage("Passwords do not match.");
+      setAuthBusy(false);
+      return;
+    }
 
     try {
       const response = await fetch(publicAppPath("/api/signups"), {
@@ -999,7 +1094,12 @@ export default function Home() {
         });
       }
 
-      setPendingRegistration(registration);
+      setPendingRegistration({
+        email: registration.email,
+        firstName: registration.firstName,
+        lastName: registration.lastName,
+        phone: registration.phone,
+      });
       setAuthMessage(
         payload.notificationSent
           ? ""
@@ -1801,54 +1901,87 @@ export default function Home() {
           </section>
 
           <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl">
-            <div className="mb-4 grid grid-cols-2 gap-2">
-              <button
-                className={`rounded-md px-3 py-2 text-sm font-medium ${
-                  authMode === "sign-in"
-                    ? "bg-[var(--mint)] text-[#01161c]"
-                    : "border border-[var(--line)] text-[var(--muted)] hover:text-white"
-                }`}
-                type="button"
-                onClick={() => setAuthMode("sign-in")}
-              >
-                Sign in
-              </button>
-              <button
-                className={`rounded-md px-3 py-2 text-sm font-medium ${
-                  authMode === "register"
-                    ? "bg-[var(--mint)] text-[#01161c]"
-                    : "border border-[var(--line)] text-[var(--muted)] hover:text-white"
-                }`}
-                type="button"
-                onClick={() => setAuthMode("register")}
-              >
-                Request access
-              </button>
-            </div>
+            {authMode !== "reset-password" && (
+              <div className="mb-4 grid grid-cols-2 gap-2">
+                <button
+                  className={`rounded-md px-3 py-2 text-sm font-medium ${
+                    authMode === "sign-in" || authMode === "forgot-password"
+                      ? "bg-[var(--mint)] text-[#01161c]"
+                      : "border border-[var(--line)] text-[var(--muted)] hover:text-white"
+                  }`}
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("sign-in");
+                    setAuthMessage("");
+                  }}
+                >
+                  Sign in
+                </button>
+                <button
+                  className={`rounded-md px-3 py-2 text-sm font-medium ${
+                    authMode === "register"
+                      ? "bg-[var(--mint)] text-[#01161c]"
+                      : "border border-[var(--line)] text-[var(--muted)] hover:text-white"
+                  }`}
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("register");
+                    setAuthMessage("");
+                  }}
+                >
+                  Request access
+                </button>
+              </div>
+            )}
 
-            {authMode === "sign-in" ? (
+            {authMode === "sign-in" && (
               <form className="space-y-3" onSubmit={submitSignIn}>
                 <label className="block text-sm font-medium" htmlFor="email">
                   Email
+                  <div className="mt-1 flex items-center gap-2 rounded-md border border-[var(--line)] bg-black/20 px-3">
+                    <Mail aria-hidden="true" className="size-4 text-[var(--muted)]" />
+                    <input
+                      className="min-h-11 w-full bg-transparent text-sm outline-none placeholder:text-[var(--muted)]"
+                      id="email"
+                      type="email"
+                      required
+                      value={signInEmail}
+                      placeholder={correspondenceEmail}
+                      onChange={(event) => setSignInEmail(event.target.value)}
+                    />
+                  </div>
                 </label>
-                <div className="flex items-center gap-2 rounded-md border border-[var(--line)] bg-black/20 px-3">
-                  <Mail aria-hidden="true" className="size-4 text-[var(--muted)]" />
+                <label className="block text-sm font-medium" htmlFor="password">
+                  Password
                   <input
-                    className="min-h-11 w-full bg-transparent text-sm outline-none placeholder:text-[var(--muted)]"
-                    id="email"
-                    type="email"
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                    id="password"
+                    type="password"
                     required
-                    value={signInEmail}
-                    placeholder={correspondenceEmail}
-                    onChange={(event) => setSignInEmail(event.target.value)}
+                    value={signInPassword}
+                    onChange={(event) => setSignInPassword(event.target.value)}
                   />
-                </div>
+                </label>
                 <button
                   className="w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
                   type="submit"
                   disabled={authBusy}
                 >
-                  Send sign-in link
+                  Sign in
+                </button>
+                <button
+                  className="w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
+                  type="button"
+                  onClick={() => {
+                    setResetPasswordForm((current) => ({
+                      ...current,
+                      email: signInEmail,
+                    }));
+                    setAuthMode("forgot-password");
+                    setAuthMessage("");
+                  }}
+                >
+                  Forgot password?
                 </button>
                 {authMessage && (
                   <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
@@ -1856,7 +1989,119 @@ export default function Home() {
                   </p>
                 )}
               </form>
-            ) : (
+            )}
+
+            {authMode === "forgot-password" && (
+              <form className="space-y-3" onSubmit={submitForgotPassword}>
+                <label className="block text-sm font-medium" htmlFor="resetEmail">
+                  Email
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                    id="resetEmail"
+                    type="email"
+                    required
+                    value={resetPasswordForm.email}
+                    onChange={(event) =>
+                      setResetPasswordForm((current) => ({
+                        ...current,
+                        email: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <button
+                  className="w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                  type="submit"
+                  disabled={authBusy}
+                >
+                  Send reset link
+                </button>
+                <button
+                  className="w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("sign-in");
+                    setAuthMessage("");
+                  }}
+                >
+                  Back to sign in
+                </button>
+                {authMessage && (
+                  <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                    {authMessage}
+                  </p>
+                )}
+              </form>
+            )}
+
+            {authMode === "reset-password" && (
+              <form className="space-y-3" onSubmit={submitResetPassword}>
+                <div>
+                  <p className="text-sm text-[var(--muted)]">Fit East London</p>
+                  <h2 className="text-xl font-semibold">Create new password</h2>
+                </div>
+                <label className="block text-sm font-medium" htmlFor="resetLinkEmail">
+                  Email
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm text-[var(--muted)] outline-none"
+                    id="resetLinkEmail"
+                    readOnly
+                    value={resetPasswordForm.email}
+                  />
+                </label>
+                <label className="block text-sm font-medium" htmlFor="newPassword">
+                  New password
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                    id="newPassword"
+                    type="password"
+                    required
+                    minLength={8}
+                    value={resetPasswordForm.password}
+                    onChange={(event) =>
+                      setResetPasswordForm((current) => ({
+                        ...current,
+                        password: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label
+                  className="block text-sm font-medium"
+                  htmlFor="newPasswordConfirm"
+                >
+                  Confirm password
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                    id="newPasswordConfirm"
+                    type="password"
+                    required
+                    minLength={8}
+                    value={resetPasswordForm.passwordConfirm}
+                    onChange={(event) =>
+                      setResetPasswordForm((current) => ({
+                        ...current,
+                        passwordConfirm: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <button
+                  className="w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                  type="submit"
+                  disabled={authBusy}
+                >
+                  Set new password
+                </button>
+                {authMessage && (
+                  <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                    {authMessage}
+                  </p>
+                )}
+              </form>
+            )}
+
+            {authMode === "register" && (
               <form className="space-y-3" onSubmit={submitRegistration}>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="block text-sm font-medium" htmlFor="firstName">
@@ -1920,6 +2165,45 @@ export default function Home() {
                     }
                   />
                 </label>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm font-medium" htmlFor="registerPassword">
+                    Password
+                    <input
+                      className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                      id="registerPassword"
+                      type="password"
+                      required
+                      minLength={8}
+                      value={registration.password}
+                      onChange={(event) =>
+                        setRegistration((current) => ({
+                          ...current,
+                          password: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label
+                    className="block text-sm font-medium"
+                    htmlFor="registerPasswordConfirm"
+                  >
+                    Confirm password
+                    <input
+                      className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                      id="registerPasswordConfirm"
+                      type="password"
+                      required
+                      minLength={8}
+                      value={registration.passwordConfirm}
+                      onChange={(event) =>
+                        setRegistration((current) => ({
+                          ...current,
+                          passwordConfirm: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
                 <button
                   className="flex w-full items-center justify-center gap-2 rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
                   type="submit"
@@ -1928,6 +2212,11 @@ export default function Home() {
                   <UserPlus aria-hidden="true" className="size-4" />
                   Submit request
                 </button>
+                {authMessage && (
+                  <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                    {authMessage}
+                  </p>
+                )}
               </form>
             )}
           </section>

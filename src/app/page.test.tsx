@@ -31,20 +31,26 @@ afterEach(() => {
 });
 
 describe("demo account entry", () => {
-  it("supports magic-link sign-in copy and member access requests", async () => {
+  it("supports password reset copy and member access requests", async () => {
     const user = renderHome();
     render(<Home />);
 
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
     await user.type(screen.getByLabelText("Email"), "coach@example.com");
-    await user.click(screen.getByRole("button", { name: "Send sign-in link" }));
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
 
-    expect(screen.getByText("Sign-in link sent to coach@example.com.")).toBeTruthy();
+    expect(
+      screen.getByText("Password reset email sent to coach@example.com."),
+    ).toBeTruthy();
 
+    await user.click(screen.getByRole("button", { name: "Back to sign in" }));
     await user.click(screen.getByRole("button", { name: "Request access" }));
     await user.type(screen.getByLabelText("First name"), "New");
     await user.type(screen.getByLabelText("Last name"), "Member");
     await user.type(screen.getByLabelText("Email"), "new@example.com");
     await user.type(screen.getByLabelText("Phone"), "07123 456789");
+    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.type(screen.getByLabelText("Confirm password"), "password123");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
 
     expect(screen.getByText("Waiting for approval")).toBeTruthy();

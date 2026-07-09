@@ -6,6 +6,7 @@ import {
   parseCorrespondenceEvent,
   sendCorrespondenceEmail,
 } from "@/lib/outbound-email";
+import { hashPassword, validatePassword } from "@/lib/passwords";
 
 type ExistingMemberRow = {
   id: string;
@@ -32,7 +33,14 @@ export async function POST(request: Request) {
     return invalidSignup("First name, last name, and email are required.");
   }
 
+  const passwordError = validatePassword(signup.password);
+
+  if (passwordError) {
+    return invalidSignup(passwordError);
+  }
+
   const db = await requireDatabase();
+  const passwordHash = await hashPassword(signup.password);
   const existing = await db
     .prepare("select id, role, status from members where email = ?1")
     .bind(signup.email)
@@ -45,29 +53,43 @@ export async function POST(request: Request) {
     );
   }
 
+  if (existing?.status === "active") {
+    return NextResponse.json(
+      { error: "An account already exists for this email." },
+      { status: 409 },
+    );
+  }
+
   let memberId = existing?.id;
-  let status = existing?.status ?? "pending";
+  const status = "pending" as const;
 
   if (existing) {
-    if (existing.status === "pending") {
-      await db
-        .prepare(
-          `
-            update members
-            set
-              first_name = ?1,
-              last_name = ?2,
-              phone = ?3,
-              updated_at = datetime('now')
-            where id = ?4
-          `,
-        )
-        .bind(signup.firstName, signup.lastName, signup.phone || null, existing.id)
-        .run();
-    }
+    await db
+      .prepare(
+        `
+          update members
+          set
+            first_name = ?1,
+            last_name = ?2,
+            phone = ?3,
+            weekly_quota = 1,
+            status = 'pending',
+            password_hash = ?4,
+            password_set_at = datetime('now'),
+            updated_at = datetime('now')
+          where id = ?5
+        `,
+      )
+      .bind(
+        signup.firstName,
+        signup.lastName,
+        signup.phone || null,
+        passwordHash,
+        existing.id,
+      )
+      .run();
   } else {
     memberId = createId("member");
-    status = "pending";
     await db
       .prepare(
         `
@@ -79,8 +101,10 @@ export async function POST(request: Request) {
             email,
             weekly_quota,
             role,
-            status
-          ) values (?1, ?2, ?3, ?4, ?5, 1, 'member', 'pending')
+            status,
+            password_hash,
+            password_set_at
+          ) values (?1, ?2, ?3, ?4, ?5, 1, 'member', 'pending', ?6, datetime('now'))
         `,
       )
       .bind(
@@ -89,6 +113,7 @@ export async function POST(request: Request) {
         signup.lastName,
         signup.phone || null,
         signup.email,
+        passwordHash,
       )
       .run();
   }

@@ -1,8 +1,7 @@
 import { emailConfig } from "@/lib/email-config";
 
 type CorrespondenceKind =
-  | "magic-link-requested"
-  | "sign-in-link-created"
+  | "password-reset-requested"
   | "member-access-requested"
   | "regular-slot-change-requested"
   | "regular-slot-assigned"
@@ -33,8 +32,8 @@ export type CorrespondenceEvent = {
   bookingDate?: string;
   bookingKind?: string;
   weeklyQuota?: string;
-  signInLink?: string;
   reviewLink?: string;
+  resetLink?: string;
 };
 
 export type BuiltCorrespondenceEmail = {
@@ -52,8 +51,7 @@ type SendCorrespondenceOptions = {
 };
 
 const kindLabels: Record<CorrespondenceKind, string> = {
-  "magic-link-requested": "Magic link requested",
-  "sign-in-link-created": "Sign-in link created",
+  "password-reset-requested": "Password reset requested",
   "member-access-requested": "Member access requested",
   "regular-slot-change-requested": "Regular slot change requested",
   "regular-slot-assigned": "Regular slot assigned",
@@ -161,8 +159,8 @@ function rowsForEvent(event: CorrespondenceEvent) {
     row("Booking time", event.time),
     row("Booking kind", event.bookingKind),
     row("Weekly entitlement", event.weeklyQuota),
-    row("Sign-in link", event.signInLink),
     row("Review link", event.reviewLink),
+    row("Reset link", event.resetLink),
     row("Note", event.note),
   ].filter(Boolean) as Array<readonly [string, string]>;
 }
@@ -195,8 +193,8 @@ export function parseCorrespondenceEvent(value: unknown) {
     bookingDate: cleanText(record.bookingDate),
     bookingKind: cleanText(record.bookingKind),
     weeklyQuota: cleanText(record.weeklyQuota),
-    signInLink: cleanText(record.signInLink),
     reviewLink: cleanText(record.reviewLink),
+    resetLink: cleanText(record.resetLink),
   } satisfies CorrespondenceEvent;
 }
 
@@ -211,22 +209,22 @@ export function buildCorrespondenceEmail(event: CorrespondenceEvent) {
     )
     .join("");
 
-  if (event.kind === "sign-in-link-created") {
+  if (event.kind === "password-reset-requested") {
     return {
-      subject: "[FEL Booking] Your sign-in link",
+      subject: "[FEL Booking] Reset your password",
       text: [
-        "Your Fit East London booking sign-in link",
+        "Reset your Fit East London booking password",
         "",
-        "Use this secure link to open your booking account. The link expires in 20 minutes.",
+        "Use this secure link to create a new password. The link expires in 30 minutes.",
         "",
-        event.signInLink,
+        event.resetLink,
       ].join("\n"),
       html: `
         <div style="font-family:Arial,sans-serif;line-height:1.5;color:#09242c">
-          <h1 style="font-size:20px;margin:0 0 12px">Your sign-in link</h1>
-          <p style="margin:0 0 16px">Use this secure link to open your Fit East London booking account. The link expires in 20 minutes.</p>
-          <p style="margin:0 0 16px"><a href="${escapeHtml(event.signInLink ?? "")}" style="display:inline-block;border-radius:6px;background:#00ffb8;color:#01161c;font-weight:700;padding:10px 14px;text-decoration:none">Open booking app</a></p>
-          <p style="margin:0;color:#49666e;font-size:13px">${escapeHtml(event.signInLink ?? "")}</p>
+          <h1 style="font-size:20px;margin:0 0 12px">Reset your password</h1>
+          <p style="margin:0 0 16px">Use this secure link to create a new Fit East London booking password. The link expires in 30 minutes.</p>
+          <p style="margin:0 0 16px"><a href="${escapeHtml(event.resetLink ?? "")}" style="display:inline-block;border-radius:6px;background:#00ffb8;color:#01161c;font-weight:700;padding:10px 14px;text-decoration:none">Create new password</a></p>
+          <p style="margin:0;color:#49666e;font-size:13px">${escapeHtml(event.resetLink ?? "")}</p>
         </div>
       `,
     } satisfies BuiltCorrespondenceEmail;

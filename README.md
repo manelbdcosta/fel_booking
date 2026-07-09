@@ -7,7 +7,7 @@ Mobile-first booking, rescheduling, credits, waitlist, and coach admin for Fit E
 - Next.js App Router with TypeScript
 - Cloudflare Workers via OpenNext
 - Cloudflare D1 for member, auth, schedule, booking, credit, and waitlist data
-- Email magic-link auth backed by D1 sessions
+- Password auth backed by D1 sessions and email password resets
 - SQL migrations for schema, constraints, and seed data
 - Resend for transactional email
 - Tailwind CSS for the interface
@@ -29,7 +29,7 @@ Open `http://localhost:3000`.
 
 | Name | Purpose |
 | --- | --- |
-| `AUTH_TOKEN_PEPPER` | Secret pepper used when hashing sign-in tokens |
+| `AUTH_TOKEN_PEPPER` | Secret pepper used when hashing password reset tokens |
 | `RESEND_API_KEY` | Resend API key |
 | `CORRESPONDENCE_EMAIL` | Current single inbox for app correspondence |
 | `EMAIL_FROM` | Sender used for transactional emails |
@@ -81,7 +81,7 @@ https://fiteast-scheduling.intentionalsets.com
 
 The Worker uses OpenNext for the Next.js runtime, D1 database binding `DB`, and Resend for outbound email. The D1 migrations live in `migrations/d1`.
 
-The live app stores member signups, member status, recurring slots, regular-slot change requests, auth tokens, sessions, materialized bookings, credits, and waitlist entries in D1. Signups create pending members, coaches can approve pending members, and regular-slot changes are written to D1 through route handlers.
+The live app stores member signups, member status, recurring slots, regular-slot change requests, password reset tokens, sessions, materialized bookings, credits, and waitlist entries in D1. Signups create pending members with passwords, coaches can approve pending members, and regular-slot changes are written to D1 through route handlers.
 
 Useful commands:
 
@@ -133,13 +133,14 @@ curl http://localhost:3000/health
 
 The current demo journeys covered by tests are:
 
-- Account entry: magic-link copy and self-registration pending approval.
+- Account entry: password sign-in, email password reset, and self-registration pending approval.
 - Member journey: enter as demo member, request a regular-slot change, book a makeup slot, cancel a regular booking and get prompted to rebook, join a waitlist.
 - Coach journey: enter as demo coach, see the full member roster, select a member to manage, assign a regular slot, approve a regular-slot request, override a full slot for that selected member.
 
 ## Implementation Notes
 
 - Member self-registration creates pending profiles; coach-created members are active immediately.
+- New members create a password when requesting access. Existing accounts without a password can use Forgot password to set one.
 - Cancelling a makeup booking loses the credit rather than extending it.
 - Regular recurring slots are coach-managed only. Members may submit change requests, but they cannot create or edit recurring slots themselves.
 - Coach-approved future recurring-slot changes replace future materialized regular bookings without generating credits.
