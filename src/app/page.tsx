@@ -150,30 +150,6 @@ const initialCredits: Credit[] = [
   { id: "credit-2", label: "Mon 20 Jul", expiry: "17 Aug" },
 ];
 
-const initialUpcoming: UpcomingBooking[] = [
-  {
-    id: "booking-1",
-    isoDate: "2026-07-13",
-    date: "Mon 13 Jul",
-    time: "06:30",
-    kind: "Regular",
-  },
-  {
-    id: "booking-2",
-    isoDate: "2026-07-16",
-    date: "Thu 16 Jul",
-    time: "07:00",
-    kind: "Regular",
-  },
-  {
-    id: "booking-3",
-    isoDate: "2026-07-17",
-    date: "Fri 17 Jul",
-    time: "08:30",
-    kind: "Makeup",
-  },
-];
-
 const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 const weekdayOptions = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 const effectiveWeekOptions = [
@@ -267,8 +243,37 @@ function shortDate(isoDate: string) {
   }).format(new Date(Date.UTC(year, month - 1, day, 12)));
 }
 
+function todayIsoDate() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: bookingRules.timeZone,
+    year: "numeric",
+  }).formatToParts(new Date());
+  const day = parts.find((part) => part.type === "day")?.value ?? "01";
+  const month = parts.find((part) => part.type === "month")?.value ?? "01";
+  const year = parts.find((part) => part.type === "year")?.value ?? "2026";
+
+  return `${year}-${month}-${day}`;
+}
+
+function dayIndexFromIso(isoDate: string) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const utcDay = new Date(Date.UTC(year, month - 1, day, 12)).getUTCDay();
+
+  return utcDay === 0 ? 6 : utcDay - 1;
+}
+
+function sessionDayIndexFromIso(isoDate: string) {
+  return Math.min(4, Math.max(0, dayIndexFromIso(isoDate)));
+}
+
+function weekStartFromIso(isoDate: string) {
+  return addDays(isoDate, -dayIndexFromIso(isoDate));
+}
+
 function weekStartForOffset(offset: number) {
-  return addDays("2026-07-13", offset * 7);
+  return addDays(weekStartFromIso(todayIsoDate()), offset * 7);
 }
 
 function weekRangeLabel(offset: number) {
@@ -293,6 +298,44 @@ function buildWeek(offset: number): ScheduleDay[] {
       })),
     };
   });
+}
+
+function dateLabel(isoDate: string) {
+  const dayIndex = dayIndexFromIso(isoDate);
+  const dayName = dayNames[dayIndex] ?? "Mon";
+
+  return `${dayName} ${shortDate(isoDate)}`;
+}
+
+function buildInitialUpcoming(): UpcomingBooking[] {
+  const start = weekStartForOffset(0);
+  const monday = start;
+  const thursday = addDays(start, 3);
+  const friday = addDays(start, 4);
+
+  return [
+    {
+      id: "booking-1",
+      isoDate: monday,
+      date: dateLabel(monday),
+      time: "06:30",
+      kind: "Regular",
+    },
+    {
+      id: "booking-2",
+      isoDate: thursday,
+      date: dateLabel(thursday),
+      time: "07:00",
+      kind: "Regular",
+    },
+    {
+      id: "booking-3",
+      isoDate: friday,
+      date: dateLabel(friday),
+      time: "08:30",
+      kind: "Makeup",
+    },
+  ];
 }
 
 function cloneWeek(week: ScheduleDay[]) {
@@ -361,9 +404,12 @@ export default function Home() {
     0: buildWeek(0),
   });
   const [credits, setCredits] = useState(initialCredits);
-  const [upcoming, setUpcoming] = useState(initialUpcoming);
+  const [upcoming, setUpcoming] = useState(buildInitialUpcoming);
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState(member.id);
+  const [coachDayIndex, setCoachDayIndex] = useState(() =>
+    sessionDayIndexFromIso(todayIsoDate()),
+  );
   const [regularSlotsByMember, setRegularSlotsByMember] = useState(
     initialRegularSlotsByMember,
   );
@@ -398,6 +444,13 @@ export default function Home() {
   const regularSlots = regularSlotsByMember[activeMember.id] ?? [];
 
   const week = weeks[weekOffset] ?? buildWeek(weekOffset);
+  const coachDay = week[coachDayIndex] ?? week[0];
+  const coachDayBookingCount = coachDay.slots.reduce(
+    (count, slot) => count + slot.names.length,
+    0,
+  );
+  const coachDayCapacity = coachDay.slots.length * bookingRules.slotCapacity;
+  const coachDayIsToday = coachDay.isoDate === todayIsoDate();
 
   const availableSlots = useMemo(
     () =>
@@ -456,6 +509,9 @@ export default function Home() {
 
   function enterDemo(role: DemoRole) {
     setCurrentRole(role);
+    setWeekOffset(0);
+    setCoachDayIndex(sessionDayIndexFromIso(todayIsoDate()));
+    setSelectedSlot(null);
     setAuthMessage("");
     setPendingRegistration(null);
     setMessage(role === "coach" ? "Signed in as demo coach." : "Signed in as demo member.");
@@ -689,6 +745,12 @@ export default function Home() {
   function moveWeek(direction: -1 | 1) {
     setSelectedSlot(null);
     setWeekOffset((currentOffset) => Math.min(3, Math.max(0, currentOffset + direction)));
+  }
+
+  function showToday() {
+    setWeekOffset(0);
+    setCoachDayIndex(sessionDayIndexFromIso(todayIsoDate()));
+    setSelectedSlot(null);
   }
 
   if (pendingRegistration) {
@@ -1280,13 +1342,29 @@ export default function Home() {
                 <UsersRound aria-hidden="true" className="size-4" />
                 {isCoach ? "Coach schedule" : "Member schedule"}
               </div>
-              <h2 className="mt-1 text-2xl font-semibold">Week schedule</h2>
+              <h2 className="mt-1 text-2xl font-semibold">
+                {isCoach
+                  ? coachDayIsToday
+                    ? "Today's sessions"
+                    : "Day sessions"
+                  : "Week schedule"}
+              </h2>
               <p className="mt-1 text-sm text-[var(--muted)]">
-                {isCoach ? `Managing ${activeMemberFullName}. ` : ""}
-                {message}
+                {isCoach
+                  ? `${bookingLabel(coachDay)} · ${coachDayBookingCount}/${coachDayCapacity} booked · Managing ${activeMemberFullName}. ${message}`
+                  : message}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {isCoach && (
+                <button
+                  className="rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
+                  type="button"
+                  onClick={showToday}
+                >
+                  Today
+                </button>
+              )}
               <button
                 className="flex size-10 items-center justify-center rounded-md border border-[var(--line)] text-[var(--muted)] enabled:hover:border-[var(--mint)] enabled:hover:text-white disabled:opacity-40"
                 type="button"
@@ -1312,6 +1390,39 @@ export default function Home() {
               </button>
             </div>
           </div>
+
+          {isCoach && (
+            <div className="grid grid-cols-5 gap-2 border-b border-[var(--line)] p-4">
+              {week.map((day, dayIndex) => {
+                const isSelected = dayIndex === coachDayIndex;
+                const bookedCount = day.slots.reduce(
+                  (count, slot) => count + slot.names.length,
+                  0,
+                );
+
+                return (
+                  <button
+                    className={`min-h-16 rounded-lg border px-2 py-2 text-left transition-colors ${
+                      isSelected
+                        ? "border-[var(--mint)] bg-[rgba(0,255,184,0.14)] text-white"
+                        : "border-[var(--line)] bg-black/20 text-[var(--muted)] hover:border-[var(--orange)] hover:text-white"
+                    }`}
+                    key={day.isoDate}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => {
+                      setCoachDayIndex(dayIndex);
+                      setSelectedSlot(null);
+                    }}
+                  >
+                    <div className="text-sm font-semibold">{day.day}</div>
+                    <div className="mt-1 text-xs">{day.date}</div>
+                    <div className="mt-2 text-xs">{bookedCount} booked</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {selectedDetails && (
             <div className="border-b border-[var(--line)] bg-black/20 p-4">
@@ -1400,51 +1511,129 @@ export default function Home() {
             </div>
           )}
 
-          <div className="grid gap-3 p-4 lg:grid-cols-5">
-            {week.map((day, dayIndex) => (
-              <div className="min-w-0" key={day.day}>
-                <div className="mb-3 flex items-baseline justify-between gap-2">
-                  <h3 className="text-lg font-semibold">{day.day}</h3>
-                  <span className="text-sm text-[var(--muted)]">{day.date}</span>
-                </div>
-                <div className="grid gap-2">
-                  {day.slots.map((slot, slotIndex) => {
-                    const state = slotState(slot, activeMember.firstName);
-                    const spotsLeft = bookingRules.slotCapacity - slot.names.length;
+          {isCoach ? (
+            <div className="grid gap-3 p-4">
+              {coachDay.slots.map((slot, slotIndex) => {
+                const state = slotState(slot, activeMember.firstName);
+                const spotsLeft = Math.max(
+                  0,
+                  bookingRules.slotCapacity - slot.names.length,
+                );
+                const isSelected =
+                  selectedSlot?.weekOffset === weekOffset &&
+                  selectedSlot.dayIndex === coachDayIndex &&
+                  selectedSlot.slotIndex === slotIndex;
 
-                    return (
-                      <button
-                        className={slotClasses(state)}
-                        key={`${day.day}-${slot.time}`}
-                        type="button"
-                        onClick={() =>
-                          setSelectedSlot({ weekOffset, dayIndex, slotIndex })
-                        }
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="text-base font-semibold">{slot.time}</span>
-                          <span className="text-xs text-[var(--muted)]">
-                            {state === "full" ? "Waitlist" : `${spotsLeft} spots`}
+                return (
+                  <button
+                    className={`rounded-lg border p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--mint)] ${
+                      isSelected
+                        ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)]"
+                        : state === "full"
+                          ? "border-[rgba(255,78,184,0.55)] bg-[rgba(255,78,184,0.08)] hover:border-[var(--pink)]"
+                          : "border-[var(--line)] bg-[var(--panel)] hover:border-[var(--orange)]"
+                    }`}
+                    key={`${coachDay.day}-${slot.time}`}
+                    type="button"
+                    onClick={() =>
+                      setSelectedSlot({
+                        weekOffset,
+                        dayIndex: coachDayIndex,
+                        slotIndex,
+                      })
+                    }
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xl font-semibold">{slot.time}</span>
+                          <span
+                            className={`rounded-md border px-2 py-1 text-xs ${
+                              state === "full"
+                                ? "border-[rgba(255,78,184,0.55)] text-[var(--pink)]"
+                                : "border-[var(--line)] text-[var(--muted)]"
+                            }`}
+                          >
+                            {state === "full" ? "Full" : `${spotsLeft} open`}
                           </span>
                         </div>
-                        <div className="mt-3 min-h-10 text-sm text-[var(--muted)]">
-                          {isCoach
-                            ? slot.names.length > 0
-                              ? slot.names.join(", ")
-                              : "Open"
-                            : state === "mine"
+                        <div className="mt-1 text-sm text-[var(--muted)]">
+                          {slot.names.length} of {bookingRules.slotCapacity} booked
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-[var(--line)] px-3 py-2 text-sm font-semibold text-[var(--mint)]">
+                        {slot.names.length}/{bookingRules.slotCapacity}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex min-h-8 flex-wrap gap-2">
+                      {slot.names.length > 0 ? (
+                        slot.names.map((name) => (
+                          <span
+                            className={`rounded-md border px-2 py-1 text-sm ${
+                              name === activeMember.firstName
+                                ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)] text-white"
+                                : "border-[var(--line)] bg-black/20 text-[var(--muted)]"
+                            }`}
+                            key={`${slot.time}-${name}`}
+                          >
+                            {name}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="rounded-md border border-[var(--line)] bg-black/20 px-2 py-1 text-sm text-[var(--muted)]">
+                          Open
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid gap-3 p-4 lg:grid-cols-5">
+              {week.map((day, dayIndex) => (
+                <div className="min-w-0" key={day.day}>
+                  <div className="mb-3 flex items-baseline justify-between gap-2">
+                    <h3 className="text-lg font-semibold">{day.day}</h3>
+                    <span className="text-sm text-[var(--muted)]">{day.date}</span>
+                  </div>
+                  <div className="grid gap-2">
+                    {day.slots.map((slot, slotIndex) => {
+                      const state = slotState(slot, activeMember.firstName);
+                      const spotsLeft =
+                        bookingRules.slotCapacity - slot.names.length;
+
+                      return (
+                        <button
+                          className={slotClasses(state)}
+                          key={`${day.day}-${slot.time}`}
+                          type="button"
+                          onClick={() =>
+                            setSelectedSlot({ weekOffset, dayIndex, slotIndex })
+                          }
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-base font-semibold">{slot.time}</span>
+                            <span className="text-xs text-[var(--muted)]">
+                              {state === "full" ? "Waitlist" : `${spotsLeft} spots`}
+                            </span>
+                          </div>
+                          <div className="mt-3 min-h-10 text-sm text-[var(--muted)]">
+                            {state === "mine"
                               ? "Your booking"
                               : state === "full"
                                 ? "Full"
                                 : "Open"}
-                        </div>
-                      </button>
-                    );
-                  })}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
       </div>
 

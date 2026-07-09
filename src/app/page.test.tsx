@@ -1,16 +1,22 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Home from "@/app/page";
 
-afterEach(() => {
-  cleanup();
+beforeEach(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-07-09T08:00:00+01:00"));
 });
 
 function renderHome() {
-  return userEvent.setup({ delay: null });
+  return userEvent.setup({ advanceTimers: vi.advanceTimersByTime, delay: null });
 }
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("demo account entry", () => {
   it("supports magic-link sign-in copy and member access requests", async () => {
@@ -67,7 +73,7 @@ describe("demo member journey", () => {
     await user.click(screen.getByRole("button", { name: "Book spot" }));
 
     expect(
-      screen.getByText("Makeup booked for Maddie Cannon on Mon 13 Jul at 07:30."),
+      screen.getByText("Makeup booked for Maddie Cannon on Mon 6 Jul at 07:30."),
     ).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /06:30.*Your booking/ }));
@@ -75,7 +81,7 @@ describe("demo member journey", () => {
 
     expect(
       screen.getByText(
-        "Cancelled Mon 13 Jul at 06:30. Credit issued. Pick a new slot now or decide later.",
+        "Cancelled Mon 6 Jul at 06:30. Credit issued. Pick a new slot now or decide later.",
       ),
     ).toBeTruthy();
     expect(screen.getByText("Book a session")).toBeTruthy();
@@ -85,12 +91,12 @@ describe("demo member journey", () => {
     await user.click(screen.getByRole("button", { name: "Join waitlist" }));
 
     expect(
-      screen.getByText("Joined waitlist for Maddie Cannon on Mon 13 Jul at 07:00."),
+      screen.getByText("Joined waitlist for Maddie Cannon on Mon 6 Jul at 07:00."),
     ).toBeTruthy();
     const waitlistSection = screen.getByRole("heading", { name: "Waitlist" })
       .parentElement?.parentElement;
     expect(waitlistSection).toBeTruthy();
-    expect(within(waitlistSection as HTMLElement).getByText("Mon 13 Jul")).toBeTruthy();
+    expect(within(waitlistSection as HTMLElement).getByText("Mon 6 Jul")).toBeTruthy();
   });
 });
 
@@ -102,12 +108,21 @@ describe("demo coach journey", () => {
     await user.click(screen.getByRole("button", { name: /Demo coach/ }));
 
     expect(screen.getByText("Coach schedule")).toBeTruthy();
+    expect(screen.getByText("Today's sessions")).toBeTruthy();
+    expect(screen.getByText(/Thu 9 Jul · 5\/20 booked/)).toBeTruthy();
     expect(screen.getByText("Coach managed for Maddie Cannon")).toBeTruthy();
     expect(screen.getByText("Coaches: Ben, Manu, Ennor, Mel")).toBeTruthy();
     expect(screen.getByText("3 total")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Emma Richierich/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Gemma Partridge/ })).toBeTruthy();
-    expect(screen.getByText("Emma, Gemma, Reserved, Drop-in")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /07:00.*Maddie.*Gemma/ }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", {
+        name: /07:00.*Emma.*Gemma.*Reserved.*Drop-in/,
+      }),
+    ).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /Emma Richierich/ }));
     expect(screen.getByText(/Managing Emma Richierich/)).toBeTruthy();
@@ -130,15 +145,18 @@ describe("demo coach journey", () => {
     ).toBeTruthy();
     expect(screen.getByText("approved")).toBeTruthy();
 
+    await user.click(screen.getByRole("button", { name: /Mon.*6 Jul/ }));
+    expect(screen.getByText("Day sessions")).toBeTruthy();
+
     await user.click(
       screen.getByRole("button", {
-        name: /07:00.*Emma, Gemma, Reserved, Drop-in/,
+        name: /07:00.*Emma.*Gemma.*Reserved.*Drop-in/,
       }),
     );
     await user.click(screen.getByRole("button", { name: "Override add" }));
 
     expect(
-      screen.getByText(/Coach override booked Maddie Cannon for Mon 13 Jul at 07:00/),
+      screen.getByText(/Coach override booked Maddie Cannon for Mon 6 Jul at 07:00/),
     ).toBeTruthy();
   });
 });
