@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -10,7 +10,11 @@ import {
   CheckCircle2,
   Clock3,
   Dumbbell,
+  LogOut,
+  Mail,
   Plus,
+  ShieldCheck,
+  UserPlus,
   UsersRound,
   X,
 } from "lucide-react";
@@ -18,6 +22,8 @@ import {
 import { bookingRules } from "@/lib/booking-config";
 
 type SlotState = "available" | "mine" | "full";
+type DemoRole = "member" | "coach";
+type AuthMode = "sign-in" | "register";
 
 type ScheduleSlot = {
   time: string;
@@ -58,9 +64,21 @@ type WaitlistEntry = {
   time: string;
 };
 
+type RegistrationForm = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+};
+
 const member = {
   firstName: "Amira",
   weeklyQuota: 2,
+};
+
+const coach = {
+  firstName: "Fit East",
+  lastName: "Coach",
 };
 
 const metricsBase = [
@@ -221,6 +239,18 @@ function bookingLabel(day: ScheduleDay) {
 }
 
 export default function Home() {
+  const [currentRole, setCurrentRole] = useState<DemoRole | null>(null);
+  const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
+  const [signInEmail, setSignInEmail] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [registration, setRegistration] = useState<RegistrationForm>({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+  });
+  const [pendingRegistration, setPendingRegistration] =
+    useState<RegistrationForm | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const [weeks, setWeeks] = useState<Record<number, ScheduleDay[]>>({
     0: buildWeek(0),
@@ -233,6 +263,7 @@ export default function Home() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsRead, setNotificationsRead] = useState(false);
   const [message, setMessage] = useState("Ready for bookings");
+  const isCoach = currentRole === "coach";
 
   const week = weeks[weekOffset] ?? buildWeek(weekOffset);
 
@@ -281,7 +312,36 @@ export default function Home() {
     });
   }
 
-  function bookSlot(dayIndex: number, slotIndex: number) {
+  function submitSignIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthMessage(`Magic link queued for ${signInEmail}.`);
+  }
+
+  function submitRegistration(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPendingRegistration(registration);
+  }
+
+  function enterDemo(role: DemoRole) {
+    setCurrentRole(role);
+    setAuthMessage("");
+    setPendingRegistration(null);
+    setMessage(role === "coach" ? "Signed in as demo coach." : "Signed in as demo member.");
+  }
+
+  function signOut() {
+    setCurrentRole(null);
+    setSelectedSlot(null);
+    setBookingOpen(false);
+    setNotificationsOpen(false);
+    setMessage("Ready for bookings");
+  }
+
+  function bookSlot(
+    dayIndex: number,
+    slotIndex: number,
+    options: { coachOverride?: boolean } = {},
+  ) {
     const day = week[dayIndex];
     const slot = day.slots[slotIndex];
     const state = slotState(slot);
@@ -291,12 +351,13 @@ export default function Home() {
       return;
     }
 
-    if (state === "full") {
+    if (state === "full" && !options.coachOverride) {
       joinWaitlist(dayIndex, slotIndex);
       return;
     }
 
-    const needsCredit = activeBookingsThisWeek >= member.weeklyQuota;
+    const needsCredit =
+      !options.coachOverride && activeBookingsThisWeek >= member.weeklyQuota;
 
     if (needsCredit && credits.length === 0) {
       setMessage("Weekly quota reached. A coach override would be needed.");
@@ -331,7 +392,11 @@ export default function Home() {
     );
     setSelectedSlot({ weekOffset, dayIndex, slotIndex });
     setBookingOpen(false);
-    setMessage(`${kind} booked for ${bookingLabel(day)} at ${slot.time}.`);
+    setMessage(
+      options.coachOverride
+        ? `Coach override booked ${bookingLabel(day)} at ${slot.time}.`
+        : `${kind} booked for ${bookingLabel(day)} at ${slot.time}.`,
+    );
   }
 
   function cancelSlot(dayIndex: number, slotIndex: number) {
@@ -406,6 +471,220 @@ export default function Home() {
     setWeekOffset((currentOffset) => Math.min(3, Math.max(0, currentOffset + direction)));
   }
 
+  if (pendingRegistration) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[var(--background)] px-4 py-8 text-[var(--foreground)]">
+        <section className="w-full max-w-md rounded-lg border border-[var(--line)] bg-[var(--panel)] p-5 shadow-2xl">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-lg border border-[var(--mint)] bg-[rgba(0,255,184,0.12)]">
+              <ShieldCheck aria-hidden="true" className="size-5 text-[var(--mint)]" />
+            </div>
+            <div>
+              <p className="text-sm text-[var(--muted)]">Fit East London</p>
+              <h1 className="text-xl font-semibold">Waiting for approval</h1>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-[var(--line)] bg-black/20 p-4">
+            <div className="font-medium">
+              {pendingRegistration.firstName} {pendingRegistration.lastName}
+            </div>
+            <div className="mt-1 text-sm text-[var(--muted)]">
+              {pendingRegistration.email}
+            </div>
+          </div>
+
+          <button
+            className="mt-5 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
+            type="button"
+            onClick={() => {
+              setPendingRegistration(null);
+              setAuthMode("sign-in");
+            }}
+          >
+            Back to sign in
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  if (!currentRole) {
+    return (
+      <main className="min-h-screen bg-[var(--background)] px-4 py-8 text-[var(--foreground)]">
+        <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-5xl items-center gap-6 lg:grid-cols-[1fr_26rem]">
+          <section className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="flex size-12 items-center justify-center rounded-lg border border-[var(--mint)] bg-[rgba(0,255,184,0.12)]">
+                <Dumbbell aria-hidden="true" className="size-6 text-[var(--mint)]" />
+              </div>
+              <div>
+                <p className="text-sm text-[var(--muted)]">Fit East London</p>
+                <h1 className="text-3xl font-semibold">Booking</h1>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                className="rounded-lg border border-[var(--mint)] bg-[rgba(0,255,184,0.12)] p-4 text-left hover:bg-[rgba(0,255,184,0.18)]"
+                type="button"
+                onClick={() => enterDemo("member")}
+              >
+                <UsersRound aria-hidden="true" className="mb-4 size-5 text-[var(--mint)]" />
+                <div className="font-semibold">Demo member</div>
+                <div className="mt-1 text-sm text-[var(--muted)]">Amira Khan</div>
+              </button>
+              <button
+                className="rounded-lg border border-[var(--orange)] bg-[rgba(255,138,31,0.1)] p-4 text-left hover:bg-[rgba(255,138,31,0.16)]"
+                type="button"
+                onClick={() => enterDemo("coach")}
+              >
+                <ShieldCheck
+                  aria-hidden="true"
+                  className="mb-4 size-5 text-[var(--orange)]"
+                />
+                <div className="font-semibold">Demo coach</div>
+                <div className="mt-1 text-sm text-[var(--muted)]">
+                  {coach.firstName} {coach.lastName}
+                </div>
+              </button>
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl">
+            <div className="mb-4 grid grid-cols-2 gap-2">
+              <button
+                className={`rounded-md px-3 py-2 text-sm font-medium ${
+                  authMode === "sign-in"
+                    ? "bg-[var(--mint)] text-[#01161c]"
+                    : "border border-[var(--line)] text-[var(--muted)] hover:text-white"
+                }`}
+                type="button"
+                onClick={() => setAuthMode("sign-in")}
+              >
+                Sign in
+              </button>
+              <button
+                className={`rounded-md px-3 py-2 text-sm font-medium ${
+                  authMode === "register"
+                    ? "bg-[var(--mint)] text-[#01161c]"
+                    : "border border-[var(--line)] text-[var(--muted)] hover:text-white"
+                }`}
+                type="button"
+                onClick={() => setAuthMode("register")}
+              >
+                Request access
+              </button>
+            </div>
+
+            {authMode === "sign-in" ? (
+              <form className="space-y-3" onSubmit={submitSignIn}>
+                <label className="block text-sm font-medium" htmlFor="email">
+                  Email
+                </label>
+                <div className="flex items-center gap-2 rounded-md border border-[var(--line)] bg-black/20 px-3">
+                  <Mail aria-hidden="true" className="size-4 text-[var(--muted)]" />
+                  <input
+                    className="min-h-11 w-full bg-transparent text-sm outline-none placeholder:text-[var(--muted)]"
+                    id="email"
+                    type="email"
+                    required
+                    value={signInEmail}
+                    placeholder="you@example.com"
+                    onChange={(event) => setSignInEmail(event.target.value)}
+                  />
+                </div>
+                <button
+                  className="w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                  type="submit"
+                >
+                  Send magic link
+                </button>
+                {authMessage && (
+                  <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                    {authMessage}
+                  </p>
+                )}
+              </form>
+            ) : (
+              <form className="space-y-3" onSubmit={submitRegistration}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm font-medium" htmlFor="firstName">
+                    First name
+                    <input
+                      className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                      id="firstName"
+                      required
+                      value={registration.firstName}
+                      onChange={(event) =>
+                        setRegistration((current) => ({
+                          ...current,
+                          firstName: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="block text-sm font-medium" htmlFor="lastName">
+                    Last name
+                    <input
+                      className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                      id="lastName"
+                      required
+                      value={registration.lastName}
+                      onChange={(event) =>
+                        setRegistration((current) => ({
+                          ...current,
+                          lastName: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+                <label className="block text-sm font-medium" htmlFor="registerEmail">
+                  Email
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                    id="registerEmail"
+                    type="email"
+                    required
+                    value={registration.email}
+                    onChange={(event) =>
+                      setRegistration((current) => ({
+                        ...current,
+                        email: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="block text-sm font-medium" htmlFor="phone">
+                  Phone
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                    id="phone"
+                    value={registration.phone}
+                    onChange={(event) =>
+                      setRegistration((current) => ({
+                        ...current,
+                        phone: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <button
+                  className="flex w-full items-center justify-center gap-2 rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                  type="submit"
+                >
+                  <UserPlus aria-hidden="true" className="size-4" />
+                  Submit request
+                </button>
+              </form>
+            )}
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
       <header className="relative border-b border-[var(--line)] bg-black/20">
@@ -420,6 +699,9 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <div className="hidden rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] sm:block">
+              {isCoach ? "Demo coach" : "Demo member"}
+            </div>
             <button
               className="relative flex size-10 items-center justify-center rounded-md border border-[var(--line)] text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
               type="button"
@@ -439,7 +721,16 @@ export default function Home() {
               onClick={() => setBookingOpen(true)}
             >
               <Plus aria-hidden="true" className="size-4" />
-              Book
+              {isCoach ? "Add" : "Book"}
+            </button>
+            <button
+              className="flex size-10 items-center justify-center rounded-md border border-[var(--line)] text-[var(--muted)] hover:border-[var(--pink)] hover:text-white"
+              type="button"
+              aria-label="Sign out"
+              title="Sign out"
+              onClick={signOut}
+            >
+              <LogOut aria-hidden="true" className="size-5" />
             </button>
           </div>
         </div>
@@ -486,11 +777,15 @@ export default function Home() {
           <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm text-[var(--muted)]">Member</p>
-                <h2 className="mt-1 text-2xl font-semibold">{member.firstName}</h2>
+                <p className="text-sm text-[var(--muted)]">
+                  {isCoach ? "Coach" : "Member"}
+                </p>
+                <h2 className="mt-1 text-2xl font-semibold">
+                  {isCoach ? coach.firstName : member.firstName}
+                </h2>
               </div>
               <div className="rounded-md border border-[var(--orange)] px-2 py-1 text-sm text-[var(--orange)]">
-                {member.weeklyQuota}x weekly
+                {isCoach ? "Admin" : `${member.weeklyQuota}x weekly`}
               </div>
             </div>
 
@@ -598,7 +893,7 @@ export default function Home() {
             <div>
               <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
                 <UsersRound aria-hidden="true" className="size-4" />
-                Coach view
+                {isCoach ? "Coach schedule" : "Member schedule"}
               </div>
               <h2 className="mt-1 text-2xl font-semibold">Week schedule</h2>
               <p className="mt-1 text-sm text-[var(--muted)]">{message}</p>
@@ -638,9 +933,13 @@ export default function Home() {
                     {bookingLabel(selectedDetails.day)} at {selectedDetails.slot.time}
                   </h3>
                   <p className="mt-1 text-sm text-[var(--muted)]">
-                    {selectedDetails.slot.names.length > 0
-                      ? selectedDetails.slot.names.join(", ")
-                      : "Open"}
+                    {isCoach
+                      ? selectedDetails.slot.names.length > 0
+                        ? selectedDetails.slot.names.join(", ")
+                        : "Open"
+                      : slotState(selectedDetails.slot) === "mine"
+                        ? "Your booking"
+                        : `${bookingRules.slotCapacity - selectedDetails.slot.names.length} spots available`}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -663,10 +962,23 @@ export default function Home() {
                         bookSlot(selectedDetails.dayIndex, selectedDetails.slotIndex)
                       }
                     >
-                      Book spot
+                      {isCoach ? "Add Amira" : "Book spot"}
                     </button>
                   )}
-                  {slotState(selectedDetails.slot) === "full" && (
+                  {slotState(selectedDetails.slot) === "full" && isCoach && (
+                    <button
+                      className="rounded-md bg-[var(--orange)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                      type="button"
+                      onClick={() =>
+                        bookSlot(selectedDetails.dayIndex, selectedDetails.slotIndex, {
+                          coachOverride: true,
+                        })
+                      }
+                    >
+                      Override add
+                    </button>
+                  )}
+                  {slotState(selectedDetails.slot) === "full" && !isCoach && (
                     <button
                       className="rounded-md border border-[var(--olive)] px-3 py-2 text-sm text-[var(--olive)] hover:bg-white/10"
                       type="button"
@@ -725,7 +1037,15 @@ export default function Home() {
                           </span>
                         </div>
                         <div className="mt-3 min-h-10 text-sm text-[var(--muted)]">
-                          {slot.names.length > 0 ? slot.names.join(", ") : "Open"}
+                          {isCoach
+                            ? slot.names.length > 0
+                              ? slot.names.join(", ")
+                              : "Open"
+                            : state === "mine"
+                              ? "Your booking"
+                              : state === "full"
+                                ? "Full"
+                                : "Open"}
                         </div>
                       </button>
                     );
