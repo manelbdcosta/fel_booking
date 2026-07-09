@@ -80,6 +80,21 @@ pnpm test
 pnpm build
 ```
 
+## Demo Readiness
+
+Before showing the app:
+
+```bash
+pnpm verify
+curl http://localhost:3000/health
+```
+
+The current demo journeys covered by tests are:
+
+- Account entry: magic-link copy and self-registration pending approval.
+- Member journey: enter as demo member, request a regular-slot change, book a makeup slot, cancel a regular booking and get prompted to rebook, join a waitlist.
+- Coach journey: enter as demo coach, see member names, assign a regular slot, approve a regular-slot request, override a full slot.
+
 ## Implementation Notes
 
 - Member self-registration creates pending profiles; coach-created members are active immediately.

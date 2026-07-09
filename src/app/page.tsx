@@ -578,7 +578,10 @@ export default function Home() {
           expiry: shortDate(addDays(day.isoDate, bookingRules.creditExpiryDays)),
         },
       ]);
-      setMessage(`Cancelled ${bookingLabel(day)} at ${slot.time}. Credit issued.`);
+      setBookingOpen(true);
+      setMessage(
+        `Cancelled ${bookingLabel(day)} at ${slot.time}. Credit issued. Pick a new slot now or decide later.`,
+      );
     } else {
       setMessage(`Cancelled makeup booking for ${bookingLabel(day)} at ${slot.time}.`);
     }
