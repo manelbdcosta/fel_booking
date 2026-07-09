@@ -101,10 +101,34 @@ type RegistrationForm = {
   phone: string;
 };
 
-const member = {
-  firstName: "Amira",
-  weeklyQuota: 2,
+type DemoMember = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  weeklyQuota: number;
+  status: "active" | "pending";
 };
+
+const member: DemoMember = {
+  id: "amira",
+  firstName: "Amira",
+  lastName: "Khan",
+  weeklyQuota: 2,
+  status: "active",
+};
+
+const demoMembers: DemoMember[] = [
+  member,
+  { id: "ben", firstName: "Ben", lastName: "Taylor", weeklyQuota: 1, status: "active" },
+  { id: "cara", firstName: "Cara", lastName: "Morgan", weeklyQuota: 3, status: "active" },
+  { id: "dev", firstName: "Dev", lastName: "Patel", weeklyQuota: 2, status: "active" },
+  { id: "ella", firstName: "Ella", lastName: "Reed", weeklyQuota: 1, status: "active" },
+  { id: "finn", firstName: "Finn", lastName: "Osei", weeklyQuota: 2, status: "active" },
+  { id: "gia", firstName: "Gia", lastName: "Lewis", weeklyQuota: 3, status: "active" },
+  { id: "hugo", firstName: "Hugo", lastName: "Wright", weeklyQuota: 1, status: "pending" },
+  { id: "iris", firstName: "Iris", lastName: "Stone", weeklyQuota: 2, status: "active" },
+  { id: "jonah", firstName: "Jonah", lastName: "Bell", weeklyQuota: 1, status: "active" },
+];
 
 const coach = {
   firstName: "Fit East",
@@ -159,6 +183,36 @@ const initialRegularSlots: RegularSlot[] = [
   { id: "regular-1", day: "Monday", time: "06:30" },
   { id: "regular-2", day: "Thursday", time: "07:00" },
 ];
+
+const initialRegularSlotsByMember: Record<string, RegularSlot[]> = {
+  amira: initialRegularSlots,
+  ben: [{ id: "regular-ben-1", day: "Tuesday", time: "08:00" }],
+  cara: [
+    { id: "regular-cara-1", day: "Monday", time: "07:30" },
+    { id: "regular-cara-2", day: "Wednesday", time: "07:30" },
+    { id: "regular-cara-3", day: "Friday", time: "08:30" },
+  ],
+  dev: [
+    { id: "regular-dev-1", day: "Tuesday", time: "07:00" },
+    { id: "regular-dev-2", day: "Thursday", time: "08:00" },
+  ],
+  ella: [{ id: "regular-ella-1", day: "Friday", time: "06:30" }],
+  finn: [
+    { id: "regular-finn-1", day: "Monday", time: "08:00" },
+    { id: "regular-finn-2", day: "Wednesday", time: "06:30" },
+  ],
+  gia: [
+    { id: "regular-gia-1", day: "Tuesday", time: "06:30" },
+    { id: "regular-gia-2", day: "Wednesday", time: "08:30" },
+    { id: "regular-gia-3", day: "Friday", time: "07:00" },
+  ],
+  hugo: [],
+  iris: [
+    { id: "regular-iris-1", day: "Monday", time: "08:30" },
+    { id: "regular-iris-2", day: "Thursday", time: "06:30" },
+  ],
+  jonah: [{ id: "regular-jonah-1", day: "Friday", time: "08:00" }],
+};
 
 const initialRegularSlotRequests: RegularSlotChangeRequest[] = [
   {
@@ -262,8 +316,12 @@ function cloneWeek(week: ScheduleDay[]) {
   }));
 }
 
-function slotState(slot: ScheduleSlot): SlotState {
-  if (slot.names.includes(member.firstName)) {
+function fullName(person: Pick<DemoMember, "firstName" | "lastName">) {
+  return `${person.firstName} ${person.lastName}`;
+}
+
+function slotState(slot: ScheduleSlot, memberFirstName: string): SlotState {
+  if (slot.names.includes(memberFirstName)) {
     return "mine";
   }
 
@@ -319,7 +377,10 @@ export default function Home() {
   const [credits, setCredits] = useState(initialCredits);
   const [upcoming, setUpcoming] = useState(initialUpcoming);
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
-  const [regularSlots, setRegularSlots] = useState(initialRegularSlots);
+  const [selectedMemberId, setSelectedMemberId] = useState(member.id);
+  const [regularSlotsByMember, setRegularSlotsByMember] = useState(
+    initialRegularSlotsByMember,
+  );
   const [regularSlotRequests, setRegularSlotRequests] = useState(
     initialRegularSlotRequests,
   );
@@ -345,6 +406,10 @@ export default function Home() {
   const [notificationsRead, setNotificationsRead] = useState(false);
   const [message, setMessage] = useState("Ready for bookings");
   const isCoach = currentRole === "coach";
+  const activeMember =
+    demoMembers.find((demoMember) => demoMember.id === selectedMemberId) ?? member;
+  const activeMemberFullName = fullName(activeMember);
+  const regularSlots = regularSlotsByMember[activeMember.id] ?? [];
 
   const week = weeks[weekOffset] ?? buildWeek(weekOffset);
 
@@ -353,9 +418,9 @@ export default function Home() {
       week.flatMap((day, dayIndex) =>
         day.slots
           .map((slot, slotIndex) => ({ day, dayIndex, slot, slotIndex }))
-          .filter(({ slot }) => slotState(slot) === "available"),
+          .filter(({ slot }) => slotState(slot, activeMember.firstName) === "available"),
       ),
-    [week],
+    [activeMember.firstName, week],
   );
 
   const selectedDetails =
@@ -371,7 +436,7 @@ export default function Home() {
   const activeBookingsThisWeek = week.reduce(
     (count, day) =>
       count +
-      day.slots.filter((slot) => slot.names.includes(member.firstName)).length,
+      day.slots.filter((slot) => slot.names.includes(activeMember.firstName)).length,
     0,
   );
 
@@ -427,7 +492,7 @@ export default function Home() {
       ...requests,
       {
         id: `regular-request-${Date.now()}`,
-        memberName: "Amira Khan",
+        memberName: activeMemberFullName,
         requestedDay: regularSlotChangeForm.requestedDay,
         requestedTime: regularSlotChangeForm.requestedTime,
         effectiveWeek: regularSlotChangeForm.effectiveWeek,
@@ -443,17 +508,20 @@ export default function Home() {
   function assignRegularSlot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    setRegularSlots((slots) => [
-      ...slots,
-      {
-        id: `regular-${Date.now()}`,
-        day: coachRegularSlotForm.day,
-        time: coachRegularSlotForm.time,
-      },
-    ]);
+    setRegularSlotsByMember((slotsByMember) => ({
+      ...slotsByMember,
+      [activeMember.id]: [
+        ...(slotsByMember[activeMember.id] ?? []),
+        {
+          id: `regular-${Date.now()}`,
+          day: coachRegularSlotForm.day,
+          time: coachRegularSlotForm.time,
+        },
+      ],
+    }));
     setCoachRegularSlotOpen(false);
     setMessage(
-      `Coach assigned ${coachRegularSlotForm.day} ${coachRegularSlotForm.time} from ${effectiveWeekLabel(coachRegularSlotForm.effectiveWeek)}.`,
+      `Coach assigned ${activeMemberFullName} to ${coachRegularSlotForm.day} ${coachRegularSlotForm.time} from ${effectiveWeekLabel(coachRegularSlotForm.effectiveWeek)}.`,
     );
   }
 
@@ -465,14 +533,23 @@ export default function Home() {
           : currentRequest,
       ),
     );
-    setRegularSlots((slots) => [
-      ...slots,
-      {
-        id: `regular-${request.id}`,
-        day: request.requestedDay,
-        time: request.requestedTime,
-      },
-    ]);
+    const requestMember = demoMembers.find(
+      (demoMember) => fullName(demoMember) === request.memberName,
+    );
+
+    if (requestMember) {
+      setRegularSlotsByMember((slotsByMember) => ({
+        ...slotsByMember,
+        [requestMember.id]: [
+          ...(slotsByMember[requestMember.id] ?? []),
+          {
+            id: `regular-${request.id}`,
+            day: request.requestedDay,
+            time: request.requestedTime,
+          },
+        ],
+      }));
+    }
     setMessage(
       `Approved ${request.memberName}'s regular slot request for ${request.requestedDay} ${request.requestedTime}.`,
     );
@@ -496,10 +573,10 @@ export default function Home() {
   ) {
     const day = week[dayIndex];
     const slot = day.slots[slotIndex];
-    const state = slotState(slot);
+    const state = slotState(slot, activeMember.firstName);
 
     if (state === "mine") {
-      setMessage(`${bookingLabel(day)} at ${slot.time} is already booked.`);
+      setMessage(`${activeMemberFullName} is already booked for ${bookingLabel(day)} at ${slot.time}.`);
       return;
     }
 
@@ -509,7 +586,7 @@ export default function Home() {
     }
 
     const needsCredit =
-      !options.coachOverride && activeBookingsThisWeek >= member.weeklyQuota;
+      !options.coachOverride && activeBookingsThisWeek >= activeMember.weeklyQuota;
 
     if (needsCredit && credits.length === 0) {
       setMessage("Weekly quota reached. A coach override would be needed.");
@@ -518,7 +595,7 @@ export default function Home() {
 
     updateSlot(dayIndex, slotIndex, (currentSlot) => ({
       ...currentSlot,
-      names: [...currentSlot.names, member.firstName],
+      names: [...currentSlot.names, activeMember.firstName],
     }));
 
     const kind = needsCredit ? "Makeup" : "Regular";
@@ -546,8 +623,8 @@ export default function Home() {
     setBookingOpen(false);
     setMessage(
       options.coachOverride
-        ? `Coach override booked ${bookingLabel(day)} at ${slot.time}.`
-        : `${kind} booked for ${bookingLabel(day)} at ${slot.time}.`,
+        ? `Coach override booked ${activeMemberFullName} for ${bookingLabel(day)} at ${slot.time}.`
+        : `${kind} booked for ${activeMemberFullName} on ${bookingLabel(day)} at ${slot.time}.`,
     );
   }
 
@@ -560,7 +637,7 @@ export default function Home() {
 
     updateSlot(dayIndex, slotIndex, (currentSlot) => ({
       ...currentSlot,
-      names: currentSlot.names.filter((name) => name !== member.firstName),
+      names: currentSlot.names.filter((name) => name !== activeMember.firstName),
     }));
 
     setUpcoming((currentUpcoming) =>
@@ -604,7 +681,7 @@ export default function Home() {
       return;
     }
 
-    if (activeBookingsThisWeek >= member.weeklyQuota && credits.length === 0) {
+    if (activeBookingsThisWeek >= activeMember.weeklyQuota && credits.length === 0) {
       setMessage("Weekly quota reached. A coach override would be needed.");
       return;
     }
@@ -618,7 +695,9 @@ export default function Home() {
         time: slot.time,
       },
     ]);
-    setMessage(`Joined waitlist for ${bookingLabel(day)} at ${slot.time}.`);
+    setMessage(
+      `Joined waitlist for ${activeMemberFullName} on ${bookingLabel(day)} at ${slot.time}.`,
+    );
   }
 
   function moveWeek(direction: -1 | 1) {
@@ -933,32 +1012,86 @@ export default function Home() {
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[340px_1fr]">
         <aside className="space-y-5">
           <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm text-[var(--muted)]">
-                  {isCoach ? "Coach" : "Member"}
-                </p>
-                <h2 className="mt-1 text-2xl font-semibold">
-                  {isCoach ? coach.firstName : member.firstName}
-                </h2>
-              </div>
-              <div className="rounded-md border border-[var(--orange)] px-2 py-1 text-sm text-[var(--orange)]">
-                {isCoach ? "Admin" : `${member.weeklyQuota}x weekly`}
-              </div>
-            </div>
-
-            <div className="mt-5 grid grid-cols-3 gap-2">
-              {metrics.map((metric) => (
-                <div
-                  className="rounded-lg border border-[var(--line)] bg-black/20 p-3"
-                  key={metric.label}
-                >
-                  <metric.icon aria-hidden="true" className="size-4 text-[var(--mint)]" />
-                  <div className="mt-3 text-2xl font-semibold">{metric.value}</div>
-                  <div className="text-xs text-[var(--muted)]">{metric.label}</div>
+            {isCoach ? (
+              <>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-[var(--muted)]">Coach dashboard</p>
+                    <h2 className="mt-1 text-2xl font-semibold">Members</h2>
+                  </div>
+                  <div className="rounded-md border border-[var(--orange)] px-2 py-1 text-sm text-[var(--orange)]">
+                    {demoMembers.length} total
+                  </div>
                 </div>
-              ))}
-            </div>
+
+                <div className="grid max-h-96 gap-2 overflow-y-auto pr-1">
+                  {demoMembers.map((demoMember) => {
+                    const isSelected = demoMember.id === activeMember.id;
+
+                    return (
+                      <button
+                        className={`rounded-lg border p-3 text-left ${
+                          isSelected
+                            ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)]"
+                            : "border-[var(--line)] bg-black/20 hover:border-[var(--orange)]"
+                        }`}
+                        key={demoMember.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedMemberId(demoMember.id);
+                          setSelectedSlot(null);
+                          setCoachRegularSlotForm((current) => ({
+                            ...current,
+                            memberName: fullName(demoMember),
+                          }));
+                          setMessage("Ready for bookings");
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-medium">{fullName(demoMember)}</span>
+                          <span className="text-sm text-[var(--mint)]">
+                            {demoMember.weeklyQuota}x
+                          </span>
+                        </div>
+                        <div className="mt-1 text-xs text-[var(--muted)]">
+                          {demoMember.status}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm text-[var(--muted)]">Member</p>
+                    <h2 className="mt-1 text-2xl font-semibold">
+                      {activeMember.firstName}
+                    </h2>
+                  </div>
+                  <div className="rounded-md border border-[var(--orange)] px-2 py-1 text-sm text-[var(--orange)]">
+                    {activeMember.weeklyQuota}x weekly
+                  </div>
+                </div>
+
+                <div className="mt-5 grid grid-cols-3 gap-2">
+                  {metrics.map((metric) => (
+                    <div
+                      className="rounded-lg border border-[var(--line)] bg-black/20 p-3"
+                      key={metric.label}
+                    >
+                      <metric.icon
+                        aria-hidden="true"
+                        className="size-4 text-[var(--mint)]"
+                      />
+                      <div className="mt-3 text-2xl font-semibold">{metric.value}</div>
+                      <div className="text-xs text-[var(--muted)]">{metric.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </section>
 
           <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
@@ -966,7 +1099,9 @@ export default function Home() {
               <div>
                 <h2 className="text-base font-semibold">Regular slots</h2>
                 <p className="text-xs text-[var(--muted)]">
-                  {isCoach ? "Coach managed" : "Coach approval required"}
+                  {isCoach
+                    ? `Coach managed for ${activeMemberFullName}`
+                    : "Coach approval required"}
                 </p>
               </div>
               <ShieldCheck aria-hidden="true" className="size-5 text-[var(--mint)]" />
@@ -984,6 +1119,11 @@ export default function Home() {
                   </div>
                 </div>
               ))}
+              {regularSlots.length === 0 && (
+                <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                  No regular slots assigned.
+                </p>
+              )}
             </div>
 
             {isCoach ? (
@@ -1006,7 +1146,7 @@ export default function Home() {
 
             <div className="mt-3 space-y-2">
               {regularSlotRequests
-                .filter((request) => isCoach || request.memberName === "Amira Khan")
+                .filter((request) => request.memberName === activeMemberFullName)
                 .map((request) => (
                   <div
                     className="rounded-lg border border-[var(--line)] bg-black/20 p-3"
@@ -1049,89 +1189,101 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold">Upcoming</h2>
-              <CalendarDays aria-hidden="true" className="size-5 text-[var(--orange)]" />
-            </div>
-            <div className="space-y-2">
-              {upcoming.length > 0 ? (
-                upcoming.map((booking) => (
-                  <div
-                    className="flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-black/20 p-3"
-                    key={booking.id}
-                  >
-                    <div>
-                      <div className="font-medium">{booking.date}</div>
-                      <div className="text-sm text-[var(--muted)]">{booking.kind}</div>
-                    </div>
-                    <div className="text-sm font-semibold text-[var(--mint)]">
-                      {booking.time}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
-                  No upcoming bookings.
-                </p>
-              )}
-            </div>
-          </section>
+          {!isCoach && (
+            <>
+              <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h2 className="text-base font-semibold">Upcoming</h2>
+                  <CalendarDays
+                    aria-hidden="true"
+                    className="size-5 text-[var(--orange)]"
+                  />
+                </div>
+                <div className="space-y-2">
+                  {upcoming.length > 0 ? (
+                    upcoming.map((booking) => (
+                      <div
+                        className="flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-black/20 p-3"
+                        key={booking.id}
+                      >
+                        <div>
+                          <div className="font-medium">{booking.date}</div>
+                          <div className="text-sm text-[var(--muted)]">
+                            {booking.kind}
+                          </div>
+                        </div>
+                        <div className="text-sm font-semibold text-[var(--mint)]">
+                          {booking.time}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                      No upcoming bookings.
+                    </p>
+                  )}
+                </div>
+              </section>
 
-          <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold">Credits</h2>
-              <Clock3 aria-hidden="true" className="size-5 text-[var(--pink)]" />
-            </div>
-            <div className="space-y-2">
-              {credits.length > 0 ? (
-                credits.map((credit) => (
-                  <div
-                    className="rounded-lg border border-[rgba(255,78,184,0.4)] bg-[rgba(255,78,184,0.08)] p-3"
-                    key={credit.id}
-                  >
-                    <div className="font-medium">{credit.label}</div>
-                    <div className="text-sm text-[var(--muted)]">
-                      Expires {credit.expiry}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
-                  No available credits.
-                </p>
-              )}
-            </div>
-          </section>
+              <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h2 className="text-base font-semibold">Credits</h2>
+                  <Clock3 aria-hidden="true" className="size-5 text-[var(--pink)]" />
+                </div>
+                <div className="space-y-2">
+                  {credits.length > 0 ? (
+                    credits.map((credit) => (
+                      <div
+                        className="rounded-lg border border-[rgba(255,78,184,0.4)] bg-[rgba(255,78,184,0.08)] p-3"
+                        key={credit.id}
+                      >
+                        <div className="font-medium">{credit.label}</div>
+                        <div className="text-sm text-[var(--muted)]">
+                          Expires {credit.expiry}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                      No available credits.
+                    </p>
+                  )}
+                </div>
+              </section>
 
-          <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold">Waitlist</h2>
-              <UsersRound aria-hidden="true" className="size-5 text-[var(--olive)]" />
-            </div>
-            <div className="space-y-2">
-              {waitlist.length > 0 ? (
-                waitlist.map((entry) => (
-                  <div
-                    className="flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-black/20 p-3"
-                    key={entry.id}
-                  >
-                    <div>
-                      <div className="font-medium">{entry.date}</div>
-                      <div className="text-sm text-[var(--muted)]">Waitlisted</div>
-                    </div>
-                    <div className="text-sm font-semibold text-[var(--olive)]">
-                      {entry.time}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
-                  No waitlist entries.
-                </p>
-              )}
-            </div>
-          </section>
+              <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h2 className="text-base font-semibold">Waitlist</h2>
+                  <UsersRound
+                    aria-hidden="true"
+                    className="size-5 text-[var(--olive)]"
+                  />
+                </div>
+                <div className="space-y-2">
+                  {waitlist.length > 0 ? (
+                    waitlist.map((entry) => (
+                      <div
+                        className="flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-black/20 p-3"
+                        key={entry.id}
+                      >
+                        <div>
+                          <div className="font-medium">{entry.date}</div>
+                          <div className="text-sm text-[var(--muted)]">Waitlisted</div>
+                        </div>
+                        <div className="text-sm font-semibold text-[var(--olive)]">
+                          {entry.time}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                      No waitlist entries.
+                    </p>
+                  )}
+                </div>
+              </section>
+            </>
+          )}
         </aside>
 
         <section className="min-w-0 rounded-lg border border-[var(--line)] bg-[rgba(9,36,44,0.82)]">
@@ -1142,7 +1294,10 @@ export default function Home() {
                 {isCoach ? "Coach schedule" : "Member schedule"}
               </div>
               <h2 className="mt-1 text-2xl font-semibold">Week schedule</h2>
-              <p className="mt-1 text-sm text-[var(--muted)]">{message}</p>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                {isCoach ? `Managing ${activeMemberFullName}. ` : ""}
+                {message}
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -1183,13 +1338,13 @@ export default function Home() {
                       ? selectedDetails.slot.names.length > 0
                         ? selectedDetails.slot.names.join(", ")
                         : "Open"
-                      : slotState(selectedDetails.slot) === "mine"
+                      : slotState(selectedDetails.slot, activeMember.firstName) === "mine"
                         ? "Your booking"
                         : `${bookingRules.slotCapacity - selectedDetails.slot.names.length} spots available`}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {slotState(selectedDetails.slot) === "mine" && (
+                  {slotState(selectedDetails.slot, activeMember.firstName) === "mine" && (
                     <button
                       className="rounded-md border border-[rgba(255,78,184,0.55)] px-3 py-2 text-sm text-[var(--pink)] hover:bg-[rgba(255,78,184,0.1)]"
                       type="button"
@@ -1200,7 +1355,8 @@ export default function Home() {
                       Cancel
                     </button>
                   )}
-                  {slotState(selectedDetails.slot) === "available" && (
+                  {slotState(selectedDetails.slot, activeMember.firstName) ===
+                    "available" && (
                     <button
                       className="rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
                       type="button"
@@ -1208,10 +1364,11 @@ export default function Home() {
                         bookSlot(selectedDetails.dayIndex, selectedDetails.slotIndex)
                       }
                     >
-                      {isCoach ? "Add Amira" : "Book spot"}
+                      {isCoach ? `Add ${activeMember.firstName}` : "Book spot"}
                     </button>
                   )}
-                  {slotState(selectedDetails.slot) === "full" && isCoach && (
+                  {slotState(selectedDetails.slot, activeMember.firstName) === "full" &&
+                    isCoach && (
                     <button
                       className="rounded-md bg-[var(--orange)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
                       type="button"
@@ -1224,7 +1381,8 @@ export default function Home() {
                       Override add
                     </button>
                   )}
-                  {slotState(selectedDetails.slot) === "full" && !isCoach && (
+                  {slotState(selectedDetails.slot, activeMember.firstName) === "full" &&
+                    !isCoach && (
                     <button
                       className="rounded-md border border-[var(--olive)] px-3 py-2 text-sm text-[var(--olive)] hover:bg-white/10"
                       type="button"
@@ -1264,7 +1422,7 @@ export default function Home() {
                 </div>
                 <div className="grid gap-2">
                   {day.slots.map((slot, slotIndex) => {
-                    const state = slotState(slot);
+                    const state = slotState(slot, activeMember.firstName);
                     const spotsLeft = bookingRules.slotCapacity - slot.names.length;
 
                     return (
@@ -1440,15 +1598,10 @@ export default function Home() {
             <label className="block text-sm font-medium" htmlFor="coachMemberName">
               Member
               <input
-                className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm text-[var(--muted)] outline-none"
                 id="coachMemberName"
-                value={coachRegularSlotForm.memberName}
-                onChange={(event) =>
-                  setCoachRegularSlotForm((current) => ({
-                    ...current,
-                    memberName: event.target.value,
-                  }))
-                }
+                readOnly
+                value={activeMemberFullName}
               />
             </label>
 
@@ -1528,7 +1681,9 @@ export default function Home() {
           <div className="max-h-[80vh] w-full max-w-xl overflow-y-auto rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl">
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold">Book a session</h2>
+                <h2 className="text-lg font-semibold">
+                  {isCoach ? `Add ${activeMember.firstName} to a session` : "Book a session"}
+                </h2>
                 <p className="mt-1 text-sm text-[var(--muted)]">
                   {weekRangeLabel(weekOffset)}
                 </p>

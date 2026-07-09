@@ -93,7 +93,7 @@ The current demo journeys covered by tests are:
 
 - Account entry: magic-link copy and self-registration pending approval.
 - Member journey: enter as demo member, request a regular-slot change, book a makeup slot, cancel a regular booking and get prompted to rebook, join a waitlist.
-- Coach journey: enter as demo coach, see member names, assign a regular slot, approve a regular-slot request, override a full slot.
+- Coach journey: enter as demo coach, see the full member roster, select a member to manage, assign a regular slot, approve a regular-slot request, override a full slot for that selected member.
 
 ## Implementation Notes
 

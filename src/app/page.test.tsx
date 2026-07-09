@@ -66,7 +66,9 @@ describe("demo member journey", () => {
     );
     await user.click(screen.getByRole("button", { name: "Book spot" }));
 
-    expect(screen.getByText("Makeup booked for Mon 13 Jul at 07:30.")).toBeTruthy();
+    expect(
+      screen.getByText("Makeup booked for Amira Khan on Mon 13 Jul at 07:30."),
+    ).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /06:30.*Your booking/ }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -82,7 +84,9 @@ describe("demo member journey", () => {
     await user.click(screen.getByRole("button", { name: /07:00.*Waitlist.*Full/ }));
     await user.click(screen.getByRole("button", { name: "Join waitlist" }));
 
-    expect(screen.getByText("Joined waitlist for Mon 13 Jul at 07:00.")).toBeTruthy();
+    expect(
+      screen.getByText("Joined waitlist for Amira Khan on Mon 13 Jul at 07:00."),
+    ).toBeTruthy();
     const waitlistSection = screen.getByRole("heading", { name: "Waitlist" })
       .parentElement?.parentElement;
     expect(waitlistSection).toBeTruthy();
@@ -98,22 +102,30 @@ describe("demo coach journey", () => {
     await user.click(screen.getByRole("button", { name: /Demo coach/ }));
 
     expect(screen.getByText("Coach schedule")).toBeTruthy();
-    expect(screen.getByText("Coach managed")).toBeTruthy();
+    expect(screen.getByText("Coach managed for Amira Khan")).toBeTruthy();
+    expect(screen.getByText("10 total")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Ben Taylor/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Jonah Bell/ })).toBeTruthy();
     expect(screen.getByText("Maya, Tom, Liv, Noah")).toBeTruthy();
 
+    await user.click(screen.getByRole("button", { name: /Ben Taylor/ }));
+    expect(screen.getByText(/Managing Ben Taylor/)).toBeTruthy();
+    expect(screen.getByText("Coach managed for Ben Taylor")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /Amira Khan/ }));
     await user.click(screen.getByRole("button", { name: "Assign regular slot" }));
     await user.selectOptions(screen.getByLabelText("Day"), "Friday");
     await user.selectOptions(screen.getByLabelText("Time"), "08:30");
     await user.click(screen.getByRole("button", { name: "Assign slot" }));
 
     expect(
-      screen.getByText("Coach assigned Friday 08:30 from Mon 20 Jul."),
+      screen.getByText(/Coach assigned Amira Khan to Friday 08:30 from Mon 20 Jul/),
     ).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Approve" }));
 
     expect(
-      screen.getByText("Approved Amira Khan's regular slot request for Tuesday 07:30."),
+      screen.getByText(/Approved Amira Khan's regular slot request for Tuesday 07:30/),
     ).toBeTruthy();
     expect(screen.getByText("approved")).toBeTruthy();
 
@@ -122,6 +134,8 @@ describe("demo coach journey", () => {
     );
     await user.click(screen.getByRole("button", { name: "Override add" }));
 
-    expect(screen.getByText("Coach override booked Mon 13 Jul at 07:00.")).toBeTruthy();
+    expect(
+      screen.getByText(/Coach override booked Amira Khan for Mon 13 Jul at 07:00/),
+    ).toBeTruthy();
   });
 });
