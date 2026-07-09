@@ -7,6 +7,17 @@ import Home from "@/app/page";
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-07-09T08:00:00+01:00"));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        }),
+      ),
+    ),
+  );
 });
 
 function renderHome() {
@@ -15,6 +26,7 @@ function renderHome() {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 

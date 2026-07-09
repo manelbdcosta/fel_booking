@@ -41,6 +41,32 @@ Open `http://localhost:3000`.
 
 For the current build, correspondence defaults to `manu@intentionalsets.com`.
 
+## Outbound Email
+
+Outbound correspondence is handled by the server route `POST /api/correspondence`, which sends whitelisted booking events through Resend. The browser never receives `RESEND_API_KEY`.
+
+To send real email:
+
+1. Create a Resend account.
+2. Add and verify a sending domain in Resend.
+3. Create a Resend API key.
+4. Add the key and sender settings to `.env.local` or the production host:
+
+```bash
+RESEND_API_KEY=re_...
+EMAIL_FROM="Fit East London <manu@intentionalsets.com>"
+EMAIL_REPLY_TO=manu@intentionalsets.com
+COACH_NOTIFICATION_EMAILS=manu@intentionalsets.com
+```
+
+If `RESEND_API_KEY` is missing, `/api/correspondence` returns `503` so failures are visible during setup.
+
+## GitHub Pages
+
+The repository includes a GitHub Actions workflow at `.github/workflows/pages.yml` that builds a static export for GitHub Pages. GitHub Pages can host the demo UI, but it cannot run Next.js route handlers or keep server secrets. During the Pages build, the workflow removes server-only routes such as `/api/correspondence` and `/health`.
+
+That means the GitHub Pages version is useful for showing the interface, but real outbound email requires a server runtime such as Vercel, Netlify, Cloudflare Workers, or Supabase Edge Functions.
+
 ## Database
 
 The initial schema is in `supabase/migrations/20260709113000_initial_schema.sql`.

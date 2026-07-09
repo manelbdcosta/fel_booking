@@ -140,6 +140,18 @@ const demoCoachNames = demoCoaches.join(", ");
 
 const correspondenceEmail = "manu@intentionalsets.com";
 
+function queueCorrespondence(event: Record<string, string | undefined>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  void fetch("/api/correspondence", {
+    body: JSON.stringify(event),
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  }).catch(() => undefined);
+}
+
 const metricsBase = [
   { label: "Attended", value: "42", icon: CheckCircle2 },
   { label: "Missed", value: "1", icon: AlertTriangle },
@@ -499,11 +511,22 @@ export default function Home() {
 
   function submitSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    queueCorrespondence({
+      kind: "magic-link-requested",
+      actorEmail: signInEmail,
+    });
     setAuthMessage(`Magic link queued to ${correspondenceEmail}.`);
   }
 
   function submitRegistration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    queueCorrespondence({
+      kind: "member-access-requested",
+      firstName: registration.firstName,
+      lastName: registration.lastName,
+      email: registration.email,
+      phone: registration.phone,
+    });
     setPendingRegistration(registration);
   }
 
@@ -542,6 +565,14 @@ export default function Home() {
         status: "pending",
       },
     ]);
+    queueCorrespondence({
+      kind: "regular-slot-change-requested",
+      memberName: activeMemberFullName,
+      requestedDay: regularSlotChangeForm.requestedDay,
+      requestedTime: regularSlotChangeForm.requestedTime,
+      effectiveWeek: effectiveWeekLabel(regularSlotChangeForm.effectiveWeek),
+      note: regularSlotChangeForm.note,
+    });
     setRegularSlotRequestOpen(false);
     setRegularSlotChangeForm((current) => ({ ...current, note: "" }));
     setMessage("Regular slot change request sent to the coaches.");
@@ -561,6 +592,13 @@ export default function Home() {
         },
       ],
     }));
+    queueCorrespondence({
+      kind: "regular-slot-assigned",
+      memberName: activeMemberFullName,
+      day: coachRegularSlotForm.day,
+      time: coachRegularSlotForm.time,
+      effectiveWeek: effectiveWeekLabel(coachRegularSlotForm.effectiveWeek),
+    });
     setCoachRegularSlotOpen(false);
     setMessage(
       `Coach assigned ${activeMemberFullName} to ${coachRegularSlotForm.day} ${coachRegularSlotForm.time} from ${effectiveWeekLabel(coachRegularSlotForm.effectiveWeek)}.`,
@@ -592,6 +630,13 @@ export default function Home() {
         ],
       }));
     }
+    queueCorrespondence({
+      kind: "regular-slot-request-approved",
+      memberName: request.memberName,
+      requestedDay: request.requestedDay,
+      requestedTime: request.requestedTime,
+      effectiveWeek: effectiveWeekLabel(request.effectiveWeek),
+    });
     setMessage(
       `Approved ${request.memberName}'s regular slot request for ${request.requestedDay} ${request.requestedTime}.`,
     );
@@ -605,6 +650,13 @@ export default function Home() {
           : currentRequest,
       ),
     );
+    queueCorrespondence({
+      kind: "regular-slot-request-declined",
+      memberName: request.memberName,
+      requestedDay: request.requestedDay,
+      requestedTime: request.requestedTime,
+      effectiveWeek: effectiveWeekLabel(request.effectiveWeek),
+    });
     setMessage(`Declined ${request.memberName}'s regular slot request.`);
   }
 
@@ -661,6 +713,13 @@ export default function Home() {
         (entry) => !(entry.isoDate === day.isoDate && entry.time === slot.time),
       ),
     );
+    queueCorrespondence({
+      kind: "booking-created",
+      memberName: activeMemberFullName,
+      bookingDate: bookingLabel(day),
+      time: slot.time,
+      bookingKind: options.coachOverride ? "Coach override" : kind,
+    });
     setSelectedSlot({ weekOffset, dayIndex, slotIndex });
     setBookingOpen(false);
     setMessage(
@@ -698,10 +757,24 @@ export default function Home() {
         },
       ]);
       setBookingOpen(true);
+      queueCorrespondence({
+        kind: "booking-cancelled",
+        memberName: activeMemberFullName,
+        bookingDate: bookingLabel(day),
+        time: slot.time,
+        bookingKind: matchingBooking?.kind ?? "Regular",
+      });
       setMessage(
         `Cancelled ${bookingLabel(day)} at ${slot.time}. Credit issued. Pick a new slot now or decide later.`,
       );
     } else {
+      queueCorrespondence({
+        kind: "booking-cancelled",
+        memberName: activeMemberFullName,
+        bookingDate: bookingLabel(day),
+        time: slot.time,
+        bookingKind: "Makeup",
+      });
       setMessage(`Cancelled makeup booking for ${bookingLabel(day)} at ${slot.time}.`);
     }
   }
@@ -719,6 +792,12 @@ export default function Home() {
           (entry) => !(entry.isoDate === day.isoDate && entry.time === slot.time),
         ),
       );
+      queueCorrespondence({
+        kind: "waitlist-left",
+        memberName: activeMemberFullName,
+        bookingDate: bookingLabel(day),
+        time: slot.time,
+      });
       setMessage(`Left waitlist for ${bookingLabel(day)} at ${slot.time}.`);
       return;
     }
@@ -737,6 +816,12 @@ export default function Home() {
         time: slot.time,
       },
     ]);
+    queueCorrespondence({
+      kind: "waitlist-joined",
+      memberName: activeMemberFullName,
+      bookingDate: bookingLabel(day),
+      time: slot.time,
+    });
     setMessage(
       `Joined waitlist for ${activeMemberFullName} on ${bookingLabel(day)} at ${slot.time}.`,
     );
