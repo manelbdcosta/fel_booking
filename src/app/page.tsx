@@ -1848,7 +1848,7 @@ export default function Home() {
               setAuthMode("sign-in");
             }}
           >
-            Back to sign in
+            Back to log in
           </button>
         </section>
       </main>
@@ -1915,7 +1915,7 @@ export default function Home() {
                     setAuthMessage("");
                   }}
                 >
-                  Sign in
+                  Log in
                 </button>
                 <button
                   className={`rounded-md px-3 py-2 text-sm font-medium ${
@@ -1929,7 +1929,7 @@ export default function Home() {
                     setAuthMessage("");
                   }}
                 >
-                  Request access
+                  Create account
                 </button>
               </div>
             )}
@@ -1967,7 +1967,7 @@ export default function Home() {
                   type="submit"
                   disabled={authBusy}
                 >
-                  Sign in
+                  Log in
                 </button>
                 <button
                   className="w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
@@ -2024,7 +2024,7 @@ export default function Home() {
                     setAuthMessage("");
                   }}
                 >
-                  Back to sign in
+                  Back to log in
                 </button>
                 {authMessage && (
                   <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">

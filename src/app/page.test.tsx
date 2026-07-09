@@ -43,8 +43,8 @@ describe("demo account entry", () => {
       screen.getByText("Password reset email sent to coach@example.com."),
     ).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Back to sign in" }));
-    await user.click(screen.getByRole("button", { name: "Request access" }));
+    await user.click(screen.getByRole("button", { name: "Back to log in" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
     await user.type(screen.getByLabelText("First name"), "New");
     await user.type(screen.getByLabelText("Last name"), "Member");
     await user.type(screen.getByLabelText("Email"), "new@example.com");
