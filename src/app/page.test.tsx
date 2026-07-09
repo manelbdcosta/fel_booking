@@ -143,7 +143,8 @@ describe("demo coach journey", () => {
     await user.click(screen.getByRole("button", { name: /Maddie Cannon/ }));
     await user.click(screen.getByRole("button", { name: "Manage regular slots" }));
     expect(screen.getByText(/2\/2 assigned for Maddie Cannon/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Assign slot" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add session" })).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText("Sessions per week"), {
       target: { value: "1" },
@@ -155,29 +156,30 @@ describe("demo coach journey", () => {
     ).toBeTruthy();
 
     await user.click(screen.getAllByRole("button", { name: "Remove" })[0]);
-    expect(
-      screen.getByText(/Removed Maddie Cannon's Monday 06:30 regular slot/),
-    ).toBeTruthy();
+    expect(screen.getByText("Unsaved changes. Press Save changes to keep them.")).toBeTruthy();
+    expect(screen.getByText(/1\/2 assigned for Maddie Cannon/)).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("Sessions per week"), {
       target: { value: "1" },
     });
-    expect(screen.getByText(/Updated Maddie Cannon to 1 sessions per week/)).toBeTruthy();
+    expect(screen.getByText(/1\/1 assigned for Maddie Cannon/)).toBeTruthy();
 
     await user.selectOptions(screen.getByLabelText(/Thursday 07:00 time/), "08:00");
-    expect(
-      screen.getByText(/Updated Maddie Cannon's regular slot to Thursday 08:00/),
-    ).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("Sessions per week"), {
-      target: { value: "2" },
+      target: { value: "3" },
     });
     await user.selectOptions(screen.getByLabelText("New day"), "Friday");
     await user.selectOptions(screen.getByLabelText("New time"), "08:30");
-    await user.click(screen.getByRole("button", { name: "Assign slot" }));
+    await user.click(screen.getByRole("button", { name: "Add session" }));
+    await user.selectOptions(screen.getByLabelText("New day"), "Tuesday");
+    await user.selectOptions(screen.getByLabelText("New time"), "07:30");
+    await user.click(screen.getByRole("button", { name: "Add session" }));
+    expect(screen.getByText(/3\/3 assigned for Maddie Cannon/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(
-      screen.getByText(/Coach assigned Maddie Cannon to Friday 08:30 from Mon 20 Jul/),
+      screen.getByText(/Saved regular slot changes for Maddie Cannon/),
     ).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Approve" }));

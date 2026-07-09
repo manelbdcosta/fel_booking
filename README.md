@@ -69,6 +69,8 @@ That means the GitHub Pages version is useful for showing the interface, but rea
 
 On GitHub Free, Pages requires a public repository. Private repository Pages requires a paid plan that supports private Pages.
 
+The GitHub Pages demo is not connected to the Supabase database yet. Booking and coach-management changes are held in browser state only, so they reset when the page reloads.
+
 ## Database
 
 The initial schema is in `supabase/migrations/20260709113000_initial_schema.sql`.

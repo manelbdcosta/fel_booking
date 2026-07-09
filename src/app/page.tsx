@@ -402,8 +402,15 @@ function effectiveWeekLabel(value: string) {
   );
 }
 
-function sameRegularSlot(left: Pick<RegularSlot, "day" | "time">, right: Pick<RegularSlot, "day" | "time">) {
+function sameRegularSlot(
+  left: Pick<RegularSlot, "day" | "time">,
+  right: Pick<RegularSlot, "day" | "time">,
+) {
   return left.day === right.day && left.time === right.time;
+}
+
+function regularSlotSignature(slots: RegularSlot[]) {
+  return slots.map((slot) => `${slot.id}:${slot.day}:${slot.time}`).join("|");
 }
 
 export default function Home() {
@@ -440,6 +447,9 @@ export default function Home() {
   );
   const [regularSlotRequestOpen, setRegularSlotRequestOpen] = useState(false);
   const [coachRegularSlotOpen, setCoachRegularSlotOpen] = useState(false);
+  const [regularSlotDrafts, setRegularSlotDrafts] = useState<RegularSlot[]>([]);
+  const [weeklyQuotaDraft, setWeeklyQuotaDraft] = useState(member.weeklyQuota);
+  const [regularSlotDraftNotice, setRegularSlotDraftNotice] = useState("");
   const [regularSlotChangeForm, setRegularSlotChangeForm] =
     useState<RegularSlotChangeForm>({
       requestedDay: "Tuesday",
@@ -466,6 +476,9 @@ export default function Home() {
   const regularSlots = regularSlotsByMember[activeMember.id] ?? [];
   const activeWeeklyQuota =
     weeklyQuotasByMember[activeMember.id] ?? activeMember.weeklyQuota;
+  const regularSlotDraftChanged =
+    weeklyQuotaDraft !== activeWeeklyQuota ||
+    regularSlotSignature(regularSlotDrafts) !== regularSlotSignature(regularSlots);
 
   const week = weeks[weekOffset] ?? buildWeek(weekOffset);
   const coachDay = week[coachDayIndex] ?? week[0];
@@ -586,118 +599,156 @@ export default function Home() {
     setMessage("Regular slot change request sent to the coaches.");
   }
 
-  function assignRegularSlot(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (regularSlots.length >= activeWeeklyQuota) {
-      setMessage(
-        `${activeMemberFullName} already has ${regularSlots.length}/${activeWeeklyQuota} regular slots. Remove a slot or increase their weekly sessions first.`,
-      );
-      return;
-    }
-
-    if (regularSlots.some((slot) => sameRegularSlot(slot, coachRegularSlotForm))) {
-      setMessage(
-        `${activeMemberFullName} already has ${coachRegularSlotForm.day} ${coachRegularSlotForm.time}.`,
-      );
-      return;
-    }
-
-    setRegularSlotsByMember((slotsByMember) => ({
-      ...slotsByMember,
-      [activeMember.id]: [
-        ...(slotsByMember[activeMember.id] ?? []),
-        {
-          id: `regular-${Date.now()}`,
-          day: coachRegularSlotForm.day,
-          time: coachRegularSlotForm.time,
-        },
-      ],
-    }));
-    queueCorrespondence({
-      kind: "regular-slot-assigned",
-      memberName: activeMemberFullName,
-      day: coachRegularSlotForm.day,
-      time: coachRegularSlotForm.time,
-      effectiveWeek: effectiveWeekLabel(coachRegularSlotForm.effectiveWeek),
-    });
-    setCoachRegularSlotOpen(false);
-    setMessage(
-      `Coach assigned ${activeMemberFullName} to ${coachRegularSlotForm.day} ${coachRegularSlotForm.time} from ${effectiveWeekLabel(coachRegularSlotForm.effectiveWeek)}.`,
-    );
+  function openRegularSlotManager() {
+    setRegularSlotDrafts(regularSlots.map((slot) => ({ ...slot })));
+    setWeeklyQuotaDraft(activeWeeklyQuota);
+    setRegularSlotDraftNotice("");
+    setCoachRegularSlotOpen(true);
   }
 
-  function updateWeeklyQuota(nextQuota: number) {
+  function markRegularSlotDraftChanged() {
+    setRegularSlotDraftNotice("Unsaved changes. Press Save changes to keep them.");
+  }
+
+  function updateWeeklyQuotaDraft(nextQuota: number) {
     if (!Number.isFinite(nextQuota)) {
       return;
     }
 
     const quota = Math.min(5, Math.max(1, Math.round(nextQuota)));
 
-    if (quota < regularSlots.length) {
-      setMessage(
-        `Remove regular slots before reducing ${activeMemberFullName} below ${regularSlots.length} sessions per week.`,
+    if (quota < regularSlotDrafts.length) {
+      setRegularSlotDraftNotice(
+        `Remove regular slots before reducing ${activeMemberFullName} below ${regularSlotDrafts.length} sessions per week.`,
       );
       return;
     }
 
-    setWeeklyQuotasByMember((quotasByMember) => ({
-      ...quotasByMember,
-      [activeMember.id]: quota,
-    }));
-    queueCorrespondence({
-      kind: "weekly-quota-updated",
-      memberName: activeMemberFullName,
-      weeklyQuota: String(quota),
-    });
-    setMessage(`Updated ${activeMemberFullName} to ${quota} sessions per week.`);
+    setWeeklyQuotaDraft(quota);
+    markRegularSlotDraftChanged();
   }
 
-  function updateRegularSlot(slotId: string, updatedSlot: Pick<RegularSlot, "day" | "time">) {
-    const duplicate = regularSlots.some(
+  function updateRegularSlotDraft(
+    slotId: string,
+    updatedSlot: Pick<RegularSlot, "day" | "time">,
+  ) {
+    const duplicate = regularSlotDrafts.some(
       (slot) => slot.id !== slotId && sameRegularSlot(slot, updatedSlot),
     );
 
     if (duplicate) {
-      setMessage(
+      setRegularSlotDraftNotice(
         `${activeMemberFullName} already has ${updatedSlot.day} ${updatedSlot.time}.`,
       );
       return;
     }
 
-    setRegularSlotsByMember((slotsByMember) => ({
-      ...slotsByMember,
-      [activeMember.id]: (slotsByMember[activeMember.id] ?? []).map((slot) =>
+    setRegularSlotDrafts((drafts) =>
+      drafts.map((slot) =>
         slot.id === slotId ? { ...slot, ...updatedSlot } : slot,
       ),
-    }));
-    queueCorrespondence({
-      kind: "regular-slot-updated",
-      memberName: activeMemberFullName,
-      day: updatedSlot.day,
-      time: updatedSlot.time,
-    });
-    setMessage(
-      `Updated ${activeMemberFullName}'s regular slot to ${updatedSlot.day} ${updatedSlot.time}.`,
     );
+    markRegularSlotDraftChanged();
   }
 
-  function removeRegularSlot(slot: RegularSlot) {
+  function removeRegularSlotDraft(slotId: string) {
+    setRegularSlotDrafts((drafts) =>
+      drafts.filter((currentSlot) => currentSlot.id !== slotId),
+    );
+    markRegularSlotDraftChanged();
+  }
+
+  function addRegularSlotDraft() {
+    if (regularSlotDrafts.length >= weeklyQuotaDraft) {
+      setRegularSlotDraftNotice(
+        `${activeMemberFullName} already has ${regularSlotDrafts.length}/${weeklyQuotaDraft} regular slots in this draft. Increase weekly sessions first.`,
+      );
+      return;
+    }
+
+    if (regularSlotDrafts.some((slot) => sameRegularSlot(slot, coachRegularSlotForm))) {
+      setRegularSlotDraftNotice(
+        `${activeMemberFullName} already has ${coachRegularSlotForm.day} ${coachRegularSlotForm.time}.`,
+      );
+      return;
+    }
+
+    setRegularSlotDrafts((drafts) => [
+      ...drafts,
+      {
+        id: `regular-draft-${Date.now()}`,
+        day: coachRegularSlotForm.day,
+        time: coachRegularSlotForm.time,
+      },
+    ]);
+    markRegularSlotDraftChanged();
+  }
+
+  function saveRegularSlotChanges() {
+    if (regularSlotDrafts.length > weeklyQuotaDraft) {
+      setRegularSlotDraftNotice(
+        `Remove regular slots before saving more than ${weeklyQuotaDraft} sessions per week.`,
+      );
+      return;
+    }
+
+    if (weeklyQuotaDraft !== activeWeeklyQuota) {
+      queueCorrespondence({
+        kind: "weekly-quota-updated",
+        memberName: activeMemberFullName,
+        weeklyQuota: String(weeklyQuotaDraft),
+      });
+    }
+
+    const previousSlotsById = new Map(regularSlots.map((slot) => [slot.id, slot]));
+    const draftSlotsById = new Map(regularSlotDrafts.map((slot) => [slot.id, slot]));
+
+    regularSlots.forEach((slot) => {
+      if (!draftSlotsById.has(slot.id)) {
+        queueCorrespondence({
+          kind: "regular-slot-removed",
+          memberName: activeMemberFullName,
+          day: slot.day,
+          time: slot.time,
+        });
+      }
+    });
+
+    regularSlotDrafts.forEach((slot) => {
+      const previousSlot = previousSlotsById.get(slot.id);
+
+      if (!previousSlot) {
+        queueCorrespondence({
+          kind: "regular-slot-assigned",
+          memberName: activeMemberFullName,
+          day: slot.day,
+          time: slot.time,
+          effectiveWeek: effectiveWeekLabel(coachRegularSlotForm.effectiveWeek),
+        });
+        return;
+      }
+
+      if (!sameRegularSlot(previousSlot, slot)) {
+        queueCorrespondence({
+          kind: "regular-slot-updated",
+          memberName: activeMemberFullName,
+          day: slot.day,
+          time: slot.time,
+        });
+      }
+    });
+
+    setWeeklyQuotasByMember((quotasByMember) => ({
+      ...quotasByMember,
+      [activeMember.id]: weeklyQuotaDraft,
+    }));
     setRegularSlotsByMember((slotsByMember) => ({
       ...slotsByMember,
-      [activeMember.id]: (slotsByMember[activeMember.id] ?? []).filter(
-        (currentSlot) => currentSlot.id !== slot.id,
-      ),
+      [activeMember.id]: regularSlotDrafts.map((slot) => ({ ...slot })),
     }));
-    queueCorrespondence({
-      kind: "regular-slot-removed",
-      memberName: activeMemberFullName,
-      day: slot.day,
-      time: slot.time,
-    });
-    setMessage(
-      `Removed ${activeMemberFullName}'s ${slot.day} ${slot.time} regular slot.`,
-    );
+    setRegularSlotDraftNotice("");
+    setCoachRegularSlotOpen(false);
+    setMessage(`Saved regular slot changes for ${activeMemberFullName}.`);
   }
 
   function approveRegularSlotRequest(request: RegularSlotChangeRequest) {
@@ -1371,7 +1422,7 @@ export default function Home() {
               <button
                 className="mt-3 w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
                 type="button"
-                onClick={() => setCoachRegularSlotOpen(true)}
+                onClick={openRegularSlotManager}
               >
                 Manage regular slots
               </button>
@@ -1941,15 +1992,14 @@ export default function Home() {
 
       {coachRegularSlotOpen && (
         <div className="fixed inset-0 z-30 flex items-end bg-black/60 p-4 sm:items-center sm:justify-center">
-          <form
+          <div
             className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl"
-            onSubmit={assignRegularSlot}
           >
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Manage regular slots</h2>
                 <p className="mt-1 text-sm text-[var(--muted)]">
-                  {regularSlots.length}/{activeWeeklyQuota} assigned for{" "}
+                  {regularSlotDrafts.length}/{weeklyQuotaDraft} assigned for{" "}
                   {activeMemberFullName}.
                 </p>
               </div>
@@ -1979,8 +2029,8 @@ export default function Home() {
               <select
                 className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
                 id="coachWeeklyQuota"
-                value={String(activeWeeklyQuota)}
-                onChange={(event) => updateWeeklyQuota(Number(event.target.value))}
+                value={String(weeklyQuotaDraft)}
+                onChange={(event) => updateWeeklyQuotaDraft(Number(event.target.value))}
               >
                 {[1, 2, 3, 4, 5].map((quota) => (
                   <option key={quota} value={String(quota)}>
@@ -1990,8 +2040,14 @@ export default function Home() {
               </select>
             </label>
 
+            {regularSlotDraftNotice && (
+              <p className="mt-3 rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                {regularSlotDraftNotice}
+              </p>
+            )}
+
             <div className="mt-4 space-y-2">
-              {regularSlots.map((slot) => (
+              {regularSlotDrafts.map((slot) => (
                 <div
                   className="rounded-lg border border-[var(--line)] bg-black/20 p-3"
                   key={slot.id}
@@ -2008,7 +2064,7 @@ export default function Home() {
                         id={`regular-${slot.id}-day`}
                         value={slot.day}
                         onChange={(event) =>
-                          updateRegularSlot(slot.id, {
+                          updateRegularSlotDraft(slot.id, {
                             day: event.target.value,
                             time: slot.time,
                           })
@@ -2031,7 +2087,7 @@ export default function Home() {
                         id={`regular-${slot.id}-time`}
                         value={slot.time}
                         onChange={(event) =>
-                          updateRegularSlot(slot.id, {
+                          updateRegularSlotDraft(slot.id, {
                             day: slot.day,
                             time: event.target.value,
                           })
@@ -2046,14 +2102,14 @@ export default function Home() {
                     <button
                       className="min-h-11 rounded-md border border-[rgba(255,78,184,0.55)] px-3 py-2 text-sm text-[var(--pink)] hover:bg-[rgba(255,78,184,0.1)]"
                       type="button"
-                      onClick={() => removeRegularSlot(slot)}
+                      onClick={() => removeRegularSlotDraft(slot.id)}
                     >
                       Remove
                     </button>
                   </div>
                 </div>
               ))}
-              {regularSlots.length === 0 && (
+              {regularSlotDrafts.length === 0 && (
                 <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
                   No regular slots assigned.
                 </p>
@@ -2122,13 +2178,23 @@ export default function Home() {
             </label>
 
             <button
-              className="mt-4 w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] enabled:hover:bg-white disabled:opacity-45"
-              type="submit"
-              disabled={regularSlots.length >= activeWeeklyQuota}
+              className="mt-3 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] enabled:hover:border-[var(--mint)] enabled:hover:text-white disabled:opacity-45"
+              type="button"
+              disabled={regularSlotDrafts.length >= weeklyQuotaDraft}
+              onClick={addRegularSlotDraft}
             >
-              Assign slot
+              Add session
             </button>
-          </form>
+
+            <button
+              className="mt-4 w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] enabled:hover:bg-white disabled:opacity-45"
+              type="button"
+              disabled={!regularSlotDraftChanged}
+              onClick={saveRegularSlotChanges}
+            >
+              Save changes
+            </button>
+          </div>
         </div>
       )}
 
