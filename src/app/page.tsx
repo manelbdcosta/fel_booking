@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -134,6 +134,10 @@ const demoMembers: DemoMember[] = [
     status: "active",
   },
 ];
+
+const initialWeeklyQuotas = Object.fromEntries(
+  demoMembers.map((demoMember) => [demoMember.id, demoMember.weeklyQuota]),
+) as Record<string, number>;
 
 const demoCoaches = ["Ben", "Manu", "Ennor", "Mel"];
 const demoCoachNames = demoCoaches.join(", ");
@@ -398,6 +402,10 @@ function effectiveWeekLabel(value: string) {
   );
 }
 
+function sameRegularSlot(left: Pick<RegularSlot, "day" | "time">, right: Pick<RegularSlot, "day" | "time">) {
+  return left.day === right.day && left.time === right.time;
+}
+
 export default function Home() {
   const [currentRole, setCurrentRole] = useState<DemoRole | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
@@ -425,6 +433,8 @@ export default function Home() {
   const [regularSlotsByMember, setRegularSlotsByMember] = useState(
     initialRegularSlotsByMember,
   );
+  const [weeklyQuotasByMember, setWeeklyQuotasByMember] =
+    useState(initialWeeklyQuotas);
   const [regularSlotRequests, setRegularSlotRequests] = useState(
     initialRegularSlotRequests,
   );
@@ -454,6 +464,8 @@ export default function Home() {
     demoMembers.find((demoMember) => demoMember.id === selectedMemberId) ?? member;
   const activeMemberFullName = fullName(activeMember);
   const regularSlots = regularSlotsByMember[activeMember.id] ?? [];
+  const activeWeeklyQuota =
+    weeklyQuotasByMember[activeMember.id] ?? activeMember.weeklyQuota;
 
   const week = weeks[weekOffset] ?? buildWeek(weekOffset);
   const coachDay = week[coachDayIndex] ?? week[0];
@@ -464,14 +476,10 @@ export default function Home() {
   const coachDayCapacity = coachDay.slots.length * bookingRules.slotCapacity;
   const coachDayIsToday = coachDay.isoDate === todayIsoDate();
 
-  const availableSlots = useMemo(
-    () =>
-      week.flatMap((day, dayIndex) =>
-        day.slots
-          .map((slot, slotIndex) => ({ day, dayIndex, slot, slotIndex }))
-          .filter(({ slot }) => slotState(slot, activeMember.firstName) === "available"),
-      ),
-    [activeMember.firstName, week],
+  const availableSlots = week.flatMap((day, dayIndex) =>
+    day.slots
+      .map((slot, slotIndex) => ({ day, dayIndex, slot, slotIndex }))
+      .filter(({ slot }) => slotState(slot, activeMember.firstName) === "available"),
   );
 
   const selectedDetails =
@@ -581,6 +589,20 @@ export default function Home() {
   function assignRegularSlot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (regularSlots.length >= activeWeeklyQuota) {
+      setMessage(
+        `${activeMemberFullName} already has ${regularSlots.length}/${activeWeeklyQuota} regular slots. Remove a slot or increase their weekly sessions first.`,
+      );
+      return;
+    }
+
+    if (regularSlots.some((slot) => sameRegularSlot(slot, coachRegularSlotForm))) {
+      setMessage(
+        `${activeMemberFullName} already has ${coachRegularSlotForm.day} ${coachRegularSlotForm.time}.`,
+      );
+      return;
+    }
+
     setRegularSlotsByMember((slotsByMember) => ({
       ...slotsByMember,
       [activeMember.id]: [
@@ -605,6 +627,79 @@ export default function Home() {
     );
   }
 
+  function updateWeeklyQuota(nextQuota: number) {
+    if (!Number.isFinite(nextQuota)) {
+      return;
+    }
+
+    const quota = Math.min(5, Math.max(1, Math.round(nextQuota)));
+
+    if (quota < regularSlots.length) {
+      setMessage(
+        `Remove regular slots before reducing ${activeMemberFullName} below ${regularSlots.length} sessions per week.`,
+      );
+      return;
+    }
+
+    setWeeklyQuotasByMember((quotasByMember) => ({
+      ...quotasByMember,
+      [activeMember.id]: quota,
+    }));
+    queueCorrespondence({
+      kind: "weekly-quota-updated",
+      memberName: activeMemberFullName,
+      weeklyQuota: String(quota),
+    });
+    setMessage(`Updated ${activeMemberFullName} to ${quota} sessions per week.`);
+  }
+
+  function updateRegularSlot(slotId: string, updatedSlot: Pick<RegularSlot, "day" | "time">) {
+    const duplicate = regularSlots.some(
+      (slot) => slot.id !== slotId && sameRegularSlot(slot, updatedSlot),
+    );
+
+    if (duplicate) {
+      setMessage(
+        `${activeMemberFullName} already has ${updatedSlot.day} ${updatedSlot.time}.`,
+      );
+      return;
+    }
+
+    setRegularSlotsByMember((slotsByMember) => ({
+      ...slotsByMember,
+      [activeMember.id]: (slotsByMember[activeMember.id] ?? []).map((slot) =>
+        slot.id === slotId ? { ...slot, ...updatedSlot } : slot,
+      ),
+    }));
+    queueCorrespondence({
+      kind: "regular-slot-updated",
+      memberName: activeMemberFullName,
+      day: updatedSlot.day,
+      time: updatedSlot.time,
+    });
+    setMessage(
+      `Updated ${activeMemberFullName}'s regular slot to ${updatedSlot.day} ${updatedSlot.time}.`,
+    );
+  }
+
+  function removeRegularSlot(slot: RegularSlot) {
+    setRegularSlotsByMember((slotsByMember) => ({
+      ...slotsByMember,
+      [activeMember.id]: (slotsByMember[activeMember.id] ?? []).filter(
+        (currentSlot) => currentSlot.id !== slot.id,
+      ),
+    }));
+    queueCorrespondence({
+      kind: "regular-slot-removed",
+      memberName: activeMemberFullName,
+      day: slot.day,
+      time: slot.time,
+    });
+    setMessage(
+      `Removed ${activeMemberFullName}'s ${slot.day} ${slot.time} regular slot.`,
+    );
+  }
+
   function approveRegularSlotRequest(request: RegularSlotChangeRequest) {
     setRegularSlotRequests((requests) =>
       requests.map((currentRequest) =>
@@ -620,14 +715,26 @@ export default function Home() {
     if (requestMember) {
       setRegularSlotsByMember((slotsByMember) => ({
         ...slotsByMember,
-        [requestMember.id]: [
-          ...(slotsByMember[requestMember.id] ?? []),
-          {
+        [requestMember.id]: (() => {
+          const currentSlots = slotsByMember[requestMember.id] ?? [];
+          const nextSlot = {
             id: `regular-${request.id}`,
             day: request.requestedDay,
             time: request.requestedTime,
-          },
-        ],
+          };
+          const quota =
+            weeklyQuotasByMember[requestMember.id] ?? requestMember.weeklyQuota;
+
+          if (currentSlots.some((slot) => sameRegularSlot(slot, nextSlot))) {
+            return currentSlots;
+          }
+
+          if (currentSlots.length >= quota) {
+            return [...currentSlots.slice(0, -1), nextSlot];
+          }
+
+          return [...currentSlots, nextSlot];
+        })(),
       }));
     }
     queueCorrespondence({
@@ -680,7 +787,7 @@ export default function Home() {
     }
 
     const needsCredit =
-      !options.coachOverride && activeBookingsThisWeek >= activeMember.weeklyQuota;
+      !options.coachOverride && activeBookingsThisWeek >= activeWeeklyQuota;
 
     if (needsCredit && credits.length === 0) {
       setMessage("Weekly quota reached. A coach override would be needed.");
@@ -802,7 +909,7 @@ export default function Home() {
       return;
     }
 
-    if (activeBookingsThisWeek >= activeMember.weeklyQuota && credits.length === 0) {
+    if (activeBookingsThisWeek >= activeWeeklyQuota && credits.length === 0) {
       setMessage("Weekly quota reached. A coach override would be needed.");
       return;
     }
@@ -1184,7 +1291,7 @@ export default function Home() {
                         <div className="flex items-center justify-between gap-3">
                           <span className="font-medium">{fullName(demoMember)}</span>
                           <span className="text-sm text-[var(--mint)]">
-                            {demoMember.weeklyQuota}x
+                            {weeklyQuotasByMember[demoMember.id] ?? demoMember.weeklyQuota}x
                           </span>
                         </div>
                         <div className="mt-1 text-xs text-[var(--muted)]">
@@ -1205,7 +1312,7 @@ export default function Home() {
                     </h2>
                   </div>
                   <div className="rounded-md border border-[var(--orange)] px-2 py-1 text-sm text-[var(--orange)]">
-                    {activeMember.weeklyQuota}x weekly
+                    {activeWeeklyQuota}x weekly
                   </div>
                 </div>
 
@@ -1234,7 +1341,7 @@ export default function Home() {
                 <h2 className="text-base font-semibold">Regular slots</h2>
                 <p className="text-xs text-[var(--muted)]">
                   {isCoach
-                    ? `Coach managed for ${activeMemberFullName}`
+                    ? `Coach managed for ${activeMemberFullName} · ${regularSlots.length}/${activeWeeklyQuota} assigned`
                     : "Coach approval required"}
                 </p>
               </div>
@@ -1266,7 +1373,7 @@ export default function Home() {
                 type="button"
                 onClick={() => setCoachRegularSlotOpen(true)}
               >
-                Assign regular slot
+                Manage regular slots
               </button>
             ) : (
               <button
@@ -1835,14 +1942,15 @@ export default function Home() {
       {coachRegularSlotOpen && (
         <div className="fixed inset-0 z-30 flex items-end bg-black/60 p-4 sm:items-center sm:justify-center">
           <form
-            className="w-full max-w-xl rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl"
+            className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl"
             onSubmit={assignRegularSlot}
           >
             <div className="mb-4 flex items-center justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold">Assign regular slot</h2>
+                <h2 className="text-lg font-semibold">Manage regular slots</h2>
                 <p className="mt-1 text-sm text-[var(--muted)]">
-                  Only coaches can create or change regular slots.
+                  {regularSlots.length}/{activeWeeklyQuota} assigned for{" "}
+                  {activeMemberFullName}.
                 </p>
               </div>
               <button
@@ -1866,9 +1974,95 @@ export default function Home() {
               />
             </label>
 
+            <label className="mt-3 block text-sm font-medium" htmlFor="coachWeeklyQuota">
+              Sessions per week
+              <select
+                className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                id="coachWeeklyQuota"
+                value={String(activeWeeklyQuota)}
+                onChange={(event) => updateWeeklyQuota(Number(event.target.value))}
+              >
+                {[1, 2, 3, 4, 5].map((quota) => (
+                  <option key={quota} value={String(quota)}>
+                    {quota}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="mt-4 space-y-2">
+              {regularSlots.map((slot) => (
+                <div
+                  className="rounded-lg border border-[var(--line)] bg-black/20 p-3"
+                  key={slot.id}
+                >
+                  <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                    <label
+                      className="block text-sm font-medium"
+                      htmlFor={`regular-${slot.id}-day`}
+                    >
+                      Day
+                      <select
+                        aria-label={`${slot.day} ${slot.time} day`}
+                        className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                        id={`regular-${slot.id}-day`}
+                        value={slot.day}
+                        onChange={(event) =>
+                          updateRegularSlot(slot.id, {
+                            day: event.target.value,
+                            time: slot.time,
+                          })
+                        }
+                      >
+                        {weekdayOptions.map((day) => (
+                          <option key={day}>{day}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label
+                      className="block text-sm font-medium"
+                      htmlFor={`regular-${slot.id}-time`}
+                    >
+                      Time
+                      <select
+                        aria-label={`${slot.day} ${slot.time} time`}
+                        className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                        id={`regular-${slot.id}-time`}
+                        value={slot.time}
+                        onChange={(event) =>
+                          updateRegularSlot(slot.id, {
+                            day: slot.day,
+                            time: event.target.value,
+                          })
+                        }
+                      >
+                        {bookingRules.slotTimes.map((time) => (
+                          <option key={time}>{time}</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <button
+                      className="min-h-11 rounded-md border border-[rgba(255,78,184,0.55)] px-3 py-2 text-sm text-[var(--pink)] hover:bg-[rgba(255,78,184,0.1)]"
+                      type="button"
+                      onClick={() => removeRegularSlot(slot)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {regularSlots.length === 0 && (
+                <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                  No regular slots assigned.
+                </p>
+              )}
+            </div>
+
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="block text-sm font-medium" htmlFor="coachRegularDay">
-                Day
+                New day
                 <select
                   className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
                   id="coachRegularDay"
@@ -1887,7 +2081,7 @@ export default function Home() {
               </label>
 
               <label className="block text-sm font-medium" htmlFor="coachRegularTime">
-                Time
+                New time
                 <select
                   className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
                   id="coachRegularTime"
@@ -1928,8 +2122,9 @@ export default function Home() {
             </label>
 
             <button
-              className="mt-4 w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+              className="mt-4 w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] enabled:hover:bg-white disabled:opacity-45"
               type="submit"
+              disabled={regularSlots.length >= activeWeeklyQuota}
             >
               Assign slot
             </button>

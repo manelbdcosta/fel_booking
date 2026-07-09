@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -122,7 +122,7 @@ describe("demo coach journey", () => {
     expect(screen.getByText("Coach schedule")).toBeTruthy();
     expect(screen.getByText("Today's sessions")).toBeTruthy();
     expect(screen.getByText(/Thu 9 Jul · 5\/20 booked/)).toBeTruthy();
-    expect(screen.getByText("Coach managed for Maddie Cannon")).toBeTruthy();
+    expect(screen.getByText(/Coach managed for Maddie Cannon/)).toBeTruthy();
     expect(screen.getByText("Coaches: Ben, Manu, Ennor, Mel")).toBeTruthy();
     expect(screen.getByText("3 total")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Emma Richierich/ })).toBeTruthy();
@@ -138,12 +138,42 @@ describe("demo coach journey", () => {
 
     await user.click(screen.getByRole("button", { name: /Emma Richierich/ }));
     expect(screen.getByText(/Managing Emma Richierich/)).toBeTruthy();
-    expect(screen.getByText("Coach managed for Emma Richierich")).toBeTruthy();
+    expect(screen.getByText(/Coach managed for Emma Richierich/)).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /Maddie Cannon/ }));
-    await user.click(screen.getByRole("button", { name: "Assign regular slot" }));
-    await user.selectOptions(screen.getByLabelText("Day"), "Friday");
-    await user.selectOptions(screen.getByLabelText("Time"), "08:30");
+    await user.click(screen.getByRole("button", { name: "Manage regular slots" }));
+    expect(screen.getByText(/2\/2 assigned for Maddie Cannon/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Assign slot" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Sessions per week"), {
+      target: { value: "1" },
+    });
+    expect(
+      screen.getByText(
+        /Remove regular slots before reducing Maddie Cannon below 2 sessions per week/,
+      ),
+    ).toBeTruthy();
+
+    await user.click(screen.getAllByRole("button", { name: "Remove" })[0]);
+    expect(
+      screen.getByText(/Removed Maddie Cannon's Monday 06:30 regular slot/),
+    ).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Sessions per week"), {
+      target: { value: "1" },
+    });
+    expect(screen.getByText(/Updated Maddie Cannon to 1 sessions per week/)).toBeTruthy();
+
+    await user.selectOptions(screen.getByLabelText(/Thursday 07:00 time/), "08:00");
+    expect(
+      screen.getByText(/Updated Maddie Cannon's regular slot to Thursday 08:00/),
+    ).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Sessions per week"), {
+      target: { value: "2" },
+    });
+    await user.selectOptions(screen.getByLabelText("New day"), "Friday");
+    await user.selectOptions(screen.getByLabelText("New time"), "08:30");
     await user.click(screen.getByRole("button", { name: "Assign slot" }));
 
     expect(

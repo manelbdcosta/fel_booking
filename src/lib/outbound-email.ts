@@ -7,8 +7,11 @@ type CorrespondenceKind =
   | "member-access-requested"
   | "regular-slot-change-requested"
   | "regular-slot-assigned"
+  | "regular-slot-updated"
+  | "regular-slot-removed"
   | "regular-slot-request-approved"
   | "regular-slot-request-declined"
+  | "weekly-quota-updated"
   | "booking-created"
   | "booking-cancelled"
   | "waitlist-joined"
@@ -30,6 +33,7 @@ export type CorrespondenceEvent = {
   note?: string;
   bookingDate?: string;
   bookingKind?: string;
+  weeklyQuota?: string;
 };
 
 export type BuiltCorrespondenceEmail = {
@@ -47,8 +51,11 @@ const kindLabels: Record<CorrespondenceKind, string> = {
   "member-access-requested": "Member access requested",
   "regular-slot-change-requested": "Regular slot change requested",
   "regular-slot-assigned": "Regular slot assigned",
+  "regular-slot-updated": "Regular slot updated",
+  "regular-slot-removed": "Regular slot removed",
   "regular-slot-request-approved": "Regular slot request approved",
   "regular-slot-request-declined": "Regular slot request declined",
+  "weekly-quota-updated": "Weekly entitlement updated",
   "booking-created": "Booking created",
   "booking-cancelled": "Booking cancelled",
   "waitlist-joined": "Waitlist joined",
@@ -94,6 +101,7 @@ function rowsForEvent(event: CorrespondenceEvent) {
     row("Booking date", event.bookingDate),
     row("Booking time", event.time),
     row("Booking kind", event.bookingKind),
+    row("Weekly entitlement", event.weeklyQuota),
     row("Note", event.note),
   ].filter(Boolean) as Array<readonly [string, string]>;
 }
@@ -125,6 +133,7 @@ export function parseCorrespondenceEvent(value: unknown) {
     note: cleanText(record.note),
     bookingDate: cleanText(record.bookingDate),
     bookingKind: cleanText(record.bookingKind),
+    weeklyQuota: cleanText(record.weeklyQuota),
   } satisfies CorrespondenceEvent;
 }
 
