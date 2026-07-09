@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 
-import {
-  parseCorrespondenceEvent,
-  sendCorrespondenceEmail,
-} from "@/lib/outbound-email";
-import { requireDatabase } from "@/lib/database";
+import { cleanText, requireDatabase } from "@/lib/database";
+import { createBooking } from "@/lib/schedule-data";
 import { getSessionUser, unauthorizedResponse } from "@/lib/server-auth";
 
 export async function POST(request: Request) {
@@ -23,16 +20,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const event = parseCorrespondenceEvent(body);
-
-  if (!event) {
-    return NextResponse.json(
-      { error: "Unsupported correspondence event." },
-      { status: 400 },
-    );
-  }
-
-  const result = await sendCorrespondenceEmail(event);
+  const record =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const result = await createBooking(db, user, {
+    coachOverride: record.coachOverride === true,
+    memberId: cleanText(record.memberId, 120),
+    sessionDate: cleanText(record.sessionDate, 10),
+    startTime: cleanText(record.startTime, 5),
+  });
 
   if (!result.ok) {
     return NextResponse.json(
@@ -41,5 +36,5 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true, id: result.id });
+  return NextResponse.json(result);
 }

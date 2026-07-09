@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fel-booking",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-07-09",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "routes": [
+    {
+      "pattern": "fiteast-scheduling.intentionalsets.com",
+      "custom_domain": true
+    }
+  ],
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "fel-booking"
+    }
+  ],
+  "vars": {
+    "APP_URL": "https://fiteast-scheduling.intentionalsets.com",
+    "CORRESPONDENCE_EMAIL": "manu@intentionalsets.com",
+    "EMAIL_FROM": "Fit East London <info@intentionalsets.com>",
+    "EMAIL_REPLY_TO": "manu@intentionalsets.com",
+    "COACH_NOTIFICATION_EMAILS": "manu@intentionalsets.com"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fel-booking",
+      "database_id": "5c8bed8f-c8fb-47fd-a4a5-176c45f40146",
+      "migrations_dir": "migrations/d1"
+    }
+  ]
+}

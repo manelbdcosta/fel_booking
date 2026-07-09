@@ -5,13 +5,15 @@ Mobile-first booking, rescheduling, credits, waitlist, and coach admin for Fit E
 ## Stack
 
 - Next.js App Router with TypeScript
-- Supabase Auth and Postgres
-- SQL migrations for schema, constraints, and booking RPCs
+- Cloudflare Workers via OpenNext
+- Cloudflare D1 for member, auth, schedule, booking, credit, and waitlist data
+- Email magic-link auth backed by D1 sessions
+- SQL migrations for schema, constraints, and seed data
 - Resend for transactional email
 - Tailwind CSS for the interface
 - Vitest for business-rule tests
 
-The key booking invariants should live in Postgres functions and migrations, then be called from server-side Next.js code. Capacity, quota, cutoff, waitlist, credit, and coach override checks need database transactions because waitlist emails can produce simultaneous claims for the same final spot.
+The key booking invariants live in server route handlers backed by normalized D1 tables. Capacity, quota, cutoff, waitlist, credit, and coach override checks still need more hardened transaction/concurrency work before this should be considered complete for high-contention production use.
 
 ## Local Setup
 
@@ -27,9 +29,7 @@ Open `http://localhost:3000`.
 
 | Name | Purpose |
 | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public Supabase browser key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-only key for admin jobs and seeds |
+| `AUTH_TOKEN_PEPPER` | Secret pepper used when hashing sign-in tokens |
 | `RESEND_API_KEY` | Resend API key |
 | `CORRESPONDENCE_EMAIL` | Current single inbox for app correspondence |
 | `EMAIL_FROM` | Sender used for transactional emails |
@@ -43,7 +43,7 @@ For the current build, correspondence defaults to `manu@intentionalsets.com`.
 
 ## Outbound Email
 
-Outbound correspondence is handled by the server route `POST /api/correspondence`, which sends whitelisted booking events through Resend. The browser never receives `RESEND_API_KEY`.
+Outbound correspondence is handled by server route handlers, which send whitelisted booking events through Resend using a server-side HTTPS request to `https://api.resend.com/emails`. The browser never receives `RESEND_API_KEY`.
 
 To send real email:
 
@@ -54,36 +54,48 @@ To send real email:
 
 ```bash
 RESEND_API_KEY=re_...
-EMAIL_FROM="Fit East London <manu@intentionalsets.com>"
+EMAIL_FROM="Fit East London <info@intentionalsets.com>"
 EMAIL_REPLY_TO=manu@intentionalsets.com
 COACH_NOTIFICATION_EMAILS=manu@intentionalsets.com
 ```
 
-If `RESEND_API_KEY` is missing, `/api/correspondence` returns `503` so failures are visible during setup.
+If `RESEND_API_KEY` is missing, email-sending routes return `503` so failures are visible during setup. If Resend rejects a send, the server logs and returns the Resend HTTP status and response body.
 
 ## GitHub Pages
 
 The repository includes a GitHub Actions workflow at `.github/workflows/pages.yml` that builds a static export for GitHub Pages. GitHub Pages can host the demo UI, but it cannot run Next.js route handlers or keep server secrets. During the Pages build, the workflow removes server-only routes such as `/api/correspondence` and `/health`.
 
-That means the GitHub Pages version is useful for showing the interface, but real outbound email requires a server runtime such as Vercel, Netlify, Cloudflare Workers, or Supabase Edge Functions.
+That means the GitHub Pages version is useful for showing the interface, but real outbound email and persistence require a server runtime such as Cloudflare Workers.
 
 On GitHub Free, Pages requires a public repository. Private repository Pages requires a paid plan that supports private Pages.
 
-The GitHub Pages demo is not connected to the Supabase database yet. Booking and coach-management changes are held in browser state only, so they reset when the page reloads.
+The GitHub Pages demo is not connected to the Cloudflare D1 database. Booking and coach-management changes are held in browser state only, so they reset when the page reloads.
+
+## Cloudflare
+
+The production Cloudflare Worker is configured in `wrangler.jsonc` and is deployed at:
+
+```text
+https://fiteast-scheduling.intentionalsets.com
+```
+
+The Worker uses OpenNext for the Next.js runtime, D1 database binding `DB`, and Resend for outbound email. The D1 migrations live in `migrations/d1`.
+
+The live app stores member signups, member status, recurring slots, regular-slot change requests, auth tokens, sessions, materialized bookings, credits, and waitlist entries in D1. Signups create pending members, coaches can approve pending members, and regular-slot changes are written to D1 through route handlers.
+
+Useful commands:
+
+```bash
+pnpm db:migrate:remote
+pnpm cf:build
+pnpm cf:deploy
+```
+
+Outbound email requires the Cloudflare Worker secret `RESEND_API_KEY` and a verified Resend sending domain matching `EMAIL_FROM`.
 
 ## Database
 
-The initial schema is in `supabase/migrations/20260709113000_initial_schema.sql`.
-Regular slot change requests are added in `supabase/migrations/20260709120000_regular_slot_change_requests.sql`.
-
-When the Supabase CLI is available:
-
-```bash
-supabase start
-supabase db reset
-```
-
-The seed data in `supabase/seed.sql` creates four coaches, three members, recurring slots, and two weeks of materialized bookings. Seed identities use unique `manu+...@intentionalsets.com` addresses so local auth remains compatible with the database's unique email rule.
+The D1 schema and seed data live in `migrations/d1`. The seed data creates four coaches, three members, recurring slots, and initial regular-slot requests.
 
 ## Business Rules
 

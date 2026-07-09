@@ -1,4 +1,5 @@
 const fallbackCorrespondenceEmail = "manu@intentionalsets.com";
+const fallbackSenderEmail = "info@intentionalsets.com";
 
 function splitEmails(value: string | undefined) {
   return (value ?? fallbackCorrespondenceEmail)
@@ -12,7 +13,7 @@ export const emailConfig = {
     process.env.CORRESPONDENCE_EMAIL ?? fallbackCorrespondenceEmail,
   from:
     process.env.EMAIL_FROM ??
-    `Fit East London <${fallbackCorrespondenceEmail}>`,
+    `Fit East London <${fallbackSenderEmail}>`,
   replyTo:
     process.env.EMAIL_REPLY_TO ??
     process.env.CORRESPONDENCE_EMAIL ??

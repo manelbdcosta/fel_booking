@@ -36,11 +36,9 @@ describe("demo account entry", () => {
     render(<Home />);
 
     await user.type(screen.getByLabelText("Email"), "coach@example.com");
-    await user.click(screen.getByRole("button", { name: "Send magic link" }));
+    await user.click(screen.getByRole("button", { name: "Send sign-in link" }));
 
-    expect(
-      screen.getByText("Magic link queued to manu@intentionalsets.com."),
-    ).toBeTruthy();
+    expect(screen.getByText("Sign-in link sent to coach@example.com.")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Request access" }));
     await user.type(screen.getByLabelText("First name"), "New");
@@ -51,7 +49,9 @@ describe("demo account entry", () => {
 
     expect(screen.getByText("Waiting for approval")).toBeTruthy();
     expect(
-      screen.getByText("Approval correspondence is routed to manu@intentionalsets.com."),
+      screen.getByText(
+        "Your request was saved. Coach notification email is still being configured.",
+      ),
     ).toBeTruthy();
   });
 });
@@ -61,7 +61,7 @@ describe("demo member journey", () => {
     const user = renderHome();
     render(<Home />);
 
-    await user.click(screen.getByRole("button", { name: /Demo member/ }));
+    await user.click(screen.getByRole("button", { name: /Preview member/ }));
 
     expect(screen.getByText("Member schedule")).toBeTruthy();
     expect(screen.getByText("Coach approval required")).toBeTruthy();
@@ -117,7 +117,7 @@ describe("demo coach journey", () => {
     const user = renderHome();
     render(<Home />);
 
-    await user.click(screen.getByRole("button", { name: /Demo coach/ }));
+    await user.click(screen.getByRole("button", { name: /Preview coach/ }));
 
     expect(screen.getByText("Coach schedule")).toBeTruthy();
     expect(screen.getByText("Today's sessions")).toBeTruthy();

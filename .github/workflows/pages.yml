@@ -44,6 +44,7 @@ jobs:
       - name: Build static site
         env:
           GITHUB_PAGES: "true"
+          NEXT_PUBLIC_APP_BASE_PATH: /fel_booking
         run: pnpm build
 
       - name: Upload Pages artifact

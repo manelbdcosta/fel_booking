@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -20,12 +20,18 @@ import {
 } from "lucide-react";
 
 import { bookingRules } from "@/lib/booking-config";
+import {
+  parsePersistedAppState,
+  type PersistedAppState,
+} from "@/lib/app-state";
+import { publicAppPath } from "@/lib/public-url";
 
 type SlotState = "available" | "mine" | "full";
 type DemoRole = "member" | "coach";
 type AuthMode = "sign-in" | "register";
 
 type ScheduleSlot = {
+  memberIds?: string[];
   time: string;
   names: string[];
 };
@@ -54,7 +60,7 @@ type UpcomingBooking = {
   isoDate: string;
   date: string;
   time: string;
-  kind: "Regular" | "Makeup";
+  kind: "Regular" | "Makeup" | "Coach override";
 };
 
 type WaitlistEntry = {
@@ -105,8 +111,36 @@ type DemoMember = {
   id: string;
   firstName: string;
   lastName: string;
+  email?: string;
+  phone?: string;
   weeklyQuota: number;
   status: "active" | "pending";
+  attended?: number;
+  missed?: number;
+};
+
+type AuthUser = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: DemoRole;
+};
+
+type BootstrapData = {
+  coaches?: string[];
+  members?: DemoMember[];
+  regularSlotsByMember?: Record<string, RegularSlot[]>;
+  regularSlotRequests?: RegularSlotChangeRequest[];
+  weeklyQuotasByMember?: Record<string, number>;
+};
+
+type ScheduleData = {
+  credits: Credit[];
+  upcoming: UpcomingBooking[];
+  waitlist: WaitlistEntry[];
+  week: ScheduleDay[];
+  weekStart: string;
 };
 
 const member: DemoMember = {
@@ -140,7 +174,9 @@ const initialWeeklyQuotas = Object.fromEntries(
 ) as Record<string, number>;
 
 const demoCoaches = ["Ben", "Manu", "Ennor", "Mel"];
-const demoCoachNames = demoCoaches.join(", ");
+const previewAccessEnabled =
+  process.env.NEXT_PUBLIC_ENABLE_PREVIEW_ACCESS === "true" ||
+  process.env.NODE_ENV === "test";
 
 const correspondenceEmail = "manu@intentionalsets.com";
 
@@ -149,17 +185,12 @@ function queueCorrespondence(event: Record<string, string | undefined>) {
     return;
   }
 
-  void fetch("/api/correspondence", {
+  void fetch(publicAppPath("/api/correspondence"), {
     body: JSON.stringify(event),
     headers: { "Content-Type": "application/json" },
     method: "POST",
   }).catch(() => undefined);
 }
-
-const metricsBase = [
-  { label: "Attended", value: "42", icon: CheckCircle2 },
-  { label: "Missed", value: "1", icon: AlertTriangle },
-];
 
 const initialCredits: Credit[] = [
   { id: "credit-1", label: "Thu 16 Jul", expiry: "13 Aug" },
@@ -354,10 +385,14 @@ function buildInitialUpcoming(): UpcomingBooking[] {
   ];
 }
 
-function cloneWeek(week: ScheduleDay[]) {
+function cloneWeek(week: ScheduleDay[]): ScheduleDay[] {
   return week.map((day) => ({
     ...day,
-    slots: day.slots.map((slot) => ({ ...slot, names: [...slot.names] })),
+    slots: day.slots.map((slot) => ({
+      ...slot,
+      ...(slot.memberIds ? { memberIds: [...slot.memberIds] } : {}),
+      names: [...slot.names],
+    })),
   }));
 }
 
@@ -365,8 +400,11 @@ function fullName(person: Pick<DemoMember, "firstName" | "lastName">) {
   return `${person.firstName} ${person.lastName}`;
 }
 
-function slotState(slot: ScheduleSlot, memberFirstName: string): SlotState {
-  if (slot.names.includes(memberFirstName)) {
+function slotState(slot: ScheduleSlot, activeMember: DemoMember): SlotState {
+  if (
+    slot.memberIds?.includes(activeMember.id) ||
+    (!slot.memberIds && slot.names.includes(activeMember.firstName))
+  ) {
     return "mine";
   }
 
@@ -413,11 +451,48 @@ function regularSlotSignature(slots: RegularSlot[]) {
   return slots.map((slot) => `${slot.id}:${slot.day}:${slot.time}`).join("|");
 }
 
+function pendingReviewMemberId() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const reviewMemberId = params.get("reviewMember");
+
+  try {
+    if (reviewMemberId) {
+      window.localStorage.setItem("fel_review_member", reviewMemberId);
+      return reviewMemberId;
+    }
+
+    return window.localStorage.getItem("fel_review_member");
+  } catch {
+    return reviewMemberId;
+  }
+}
+
+function clearPendingReviewMemberId(memberId: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    if (window.localStorage.getItem("fel_review_member") === memberId) {
+      window.localStorage.removeItem("fel_review_member");
+    }
+  } catch {
+    // Local storage can be unavailable in restrictive browser modes.
+  }
+}
+
 export default function Home() {
+  const appStateSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [currentRole, setCurrentRole] = useState<DemoRole | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
   const [signInEmail, setSignInEmail] = useState("");
   const [authMessage, setAuthMessage] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
   const [registration, setRegistration] = useState<RegistrationForm>({
     firstName: "",
     lastName: "",
@@ -426,6 +501,8 @@ export default function Home() {
   });
   const [pendingRegistration, setPendingRegistration] =
     useState<RegistrationForm | null>(null);
+  const [members, setMembers] = useState<DemoMember[]>(demoMembers);
+  const [coaches, setCoaches] = useState(demoCoaches);
   const [weekOffset, setWeekOffset] = useState(0);
   const [weeks, setWeeks] = useState<Record<number, ScheduleDay[]>>({
     0: buildWeek(0),
@@ -468,10 +545,12 @@ export default function Home() {
   const [bookingOpen, setBookingOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsRead, setNotificationsRead] = useState(false);
+  const [appStateLoaded, setAppStateLoaded] = useState(false);
   const [message, setMessage] = useState("Ready for bookings");
   const isCoach = currentRole === "coach";
+  const coachNames = coaches.join(", ");
   const activeMember =
-    demoMembers.find((demoMember) => demoMember.id === selectedMemberId) ?? member;
+    members.find((demoMember) => demoMember.id === selectedMemberId) ?? members[0] ?? member;
   const activeMemberFullName = fullName(activeMember);
   const regularSlots = regularSlotsByMember[activeMember.id] ?? [];
   const activeWeeklyQuota =
@@ -492,7 +571,7 @@ export default function Home() {
   const availableSlots = week.flatMap((day, dayIndex) =>
     day.slots
       .map((slot, slotIndex) => ({ day, dayIndex, slot, slotIndex }))
-      .filter(({ slot }) => slotState(slot, activeMember.firstName) === "available"),
+      .filter(({ slot }) => slotState(slot, activeMember) === "available"),
   );
 
   const selectedDetails =
@@ -513,9 +592,330 @@ export default function Home() {
   );
 
   const metrics = [
-    ...metricsBase,
+    { label: "Attended", value: String(activeMember.attended ?? 42), icon: CheckCircle2 },
+    { label: "Missed", value: String(activeMember.missed ?? 1), icon: AlertTriangle },
     { label: "Credits", value: String(credits.length), icon: Clock3 },
   ];
+
+  const applyBootstrapData = useCallback((data: BootstrapData) => {
+    if (data.members?.length) {
+      setMembers(data.members);
+      setSelectedMemberId((currentId) => {
+        if (data.members?.some((loadedMember) => loadedMember.id === currentId)) {
+          return currentId;
+        }
+
+        return data.members?.[0]?.id ?? currentId;
+      });
+    }
+
+    if (data.coaches?.length) {
+      setCoaches(data.coaches);
+    }
+
+    if (data.regularSlotsByMember) {
+      setRegularSlotsByMember(data.regularSlotsByMember);
+    }
+
+    if (data.weeklyQuotasByMember) {
+      setWeeklyQuotasByMember(data.weeklyQuotasByMember);
+    }
+
+    if (data.regularSlotRequests) {
+      setRegularSlotRequests(data.regularSlotRequests);
+    }
+  }, []);
+
+  const applyScheduleData = useCallback(
+    (data: ScheduleData, offset: number) => {
+      setCredits(data.credits);
+      setUpcoming(data.upcoming);
+      setWaitlist(data.waitlist);
+      setWeeks((storedWeeks) => ({
+        ...storedWeeks,
+        [offset]: cloneWeek(data.week),
+      }));
+      setMessage("Loaded saved bookings.");
+    },
+    [],
+  );
+
+  const loadScheduleData = useCallback(
+    async (memberId: string, offset: number) => {
+      const params = new URLSearchParams({
+        memberId,
+        weekStart: weekStartForOffset(offset),
+      });
+      const response = await fetch(publicAppPath(`/api/schedule?${params}`), {
+        headers: { Accept: "application/json" },
+      });
+      const payload = (await response.json().catch(() => ({}))) as
+        | ScheduleData
+        | { error?: string };
+
+      if (!response.ok || !("week" in payload)) {
+        const error = "error" in payload ? payload.error : undefined;
+
+        setMessage(error ?? "Could not load saved schedule.");
+        return;
+      }
+
+      applyScheduleData(payload, offset);
+    },
+    [applyScheduleData],
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadServerState() {
+      try {
+        const [sessionResponse, bootstrapResponse, appStateResponse] =
+          await Promise.all([
+            fetch(publicAppPath("/api/auth/me"), {
+              headers: { Accept: "application/json" },
+            }),
+            fetch(publicAppPath("/api/bootstrap"), {
+              headers: { Accept: "application/json" },
+            }),
+            fetch(publicAppPath("/api/app-state"), {
+              headers: { Accept: "application/json" },
+            }),
+          ]);
+
+        if (!active) {
+          return;
+        }
+
+        let signedInUser: AuthUser | null = null;
+        let bootstrapData: BootstrapData | null = null;
+
+        if (sessionResponse.ok) {
+          const payload = (await sessionResponse.json()) as { user?: AuthUser | null };
+
+          if (payload.user) {
+            signedInUser = payload.user;
+            setCurrentUser(payload.user);
+            setCurrentRole(payload.user.role);
+
+            if (payload.user.role === "member") {
+              setSelectedMemberId(payload.user.id);
+            }
+          }
+        }
+
+        if (!signedInUser && appStateResponse.ok) {
+          const payload = (await appStateResponse.json()) as { state?: unknown };
+          const persistedState = parsePersistedAppState(payload.state);
+
+          if (persistedState) {
+            setCredits(persistedState.credits);
+            setUpcoming(persistedState.upcoming);
+            setWaitlist(persistedState.waitlist);
+            setWeeks(
+              Object.fromEntries(
+                Object.entries(persistedState.weeks).map(
+                  ([offset, persistedWeek]) => [Number(offset), persistedWeek],
+                ),
+              ) as Record<number, ScheduleDay[]>,
+            );
+            setMessage("Loaded saved bookings.");
+          }
+        }
+
+        if (bootstrapResponse.ok) {
+          bootstrapData = (await bootstrapResponse.json()) as BootstrapData;
+          applyBootstrapData(bootstrapData);
+        }
+
+        if (signedInUser) {
+          const reviewMemberId = pendingReviewMemberId();
+          const reviewMember =
+            signedInUser.role === "coach" && reviewMemberId
+              ? bootstrapData?.members?.find(
+                  (loadedMember) => loadedMember.id === reviewMemberId,
+                )
+              : null;
+          const scheduleMemberId =
+            reviewMember?.id ??
+            (signedInUser.role === "member"
+              ? signedInUser.id
+              : bootstrapData?.members?.[0]?.id);
+
+          if (scheduleMemberId) {
+            if (reviewMember) {
+              setSelectedMemberId(reviewMember.id);
+              clearPendingReviewMemberId(reviewMember.id);
+              setMessage(`Reviewing ${fullName(reviewMember)}.`);
+            }
+
+            void loadScheduleData(scheduleMemberId, 0);
+          }
+        }
+      } catch {
+        // The static GitHub Pages demo and local dev without D1 keep using browser state.
+      } finally {
+        if (active) {
+          setAppStateLoaded(true);
+        }
+      }
+    }
+
+    void loadServerState();
+
+    return () => {
+      active = false;
+
+      if (appStateSaveTimer.current) {
+        clearTimeout(appStateSaveTimer.current);
+      }
+    };
+  }, [applyBootstrapData, loadScheduleData]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token");
+    const email = params.get("email");
+
+    pendingReviewMemberId();
+
+    if (!token || !email) {
+      return;
+    }
+
+    let active = true;
+
+    async function verifySignInLink() {
+      setAuthBusy(true);
+
+      try {
+        const response = await fetch(publicAppPath("/api/auth/verify"), {
+          body: JSON.stringify({ email, token }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          user?: AuthUser;
+        };
+
+        if (!active) {
+          return;
+        }
+
+        if (!response.ok || !payload.user) {
+          setAuthMessage(
+            payload.error ?? "This sign-in link is invalid or expired.",
+          );
+          return;
+        }
+
+        window.history.replaceState({}, "", window.location.pathname);
+        setCurrentUser(payload.user);
+        setCurrentRole(payload.user.role);
+
+        if (payload.user.role === "member") {
+          setSelectedMemberId(payload.user.id);
+        }
+
+        const bootstrapResponse = await fetch(publicAppPath("/api/bootstrap"), {
+          headers: { Accept: "application/json" },
+        });
+
+        let bootstrapData: BootstrapData | null = null;
+
+        if (bootstrapResponse.ok) {
+          bootstrapData = (await bootstrapResponse.json()) as BootstrapData;
+          applyBootstrapData(bootstrapData);
+        }
+
+        const reviewMemberId = pendingReviewMemberId();
+        const reviewMember =
+          payload.user.role === "coach" && reviewMemberId
+            ? bootstrapData?.members?.find(
+                (loadedMember) => loadedMember.id === reviewMemberId,
+              )
+            : null;
+        const scheduleMemberId =
+          reviewMember?.id ??
+          (payload.user.role === "member"
+            ? payload.user.id
+            : bootstrapData?.members?.[0]?.id);
+
+        if (scheduleMemberId) {
+          if (reviewMember) {
+            setSelectedMemberId(reviewMember.id);
+            clearPendingReviewMemberId(reviewMember.id);
+          }
+
+          void loadScheduleData(scheduleMemberId, 0);
+        }
+
+        setMessage(
+          reviewMember
+            ? `Reviewing ${fullName(reviewMember)}.`
+            : `Signed in as ${payload.user.firstName}.`,
+        );
+      } finally {
+        if (active) {
+          setAuthBusy(false);
+        }
+      }
+    }
+
+    void verifySignInLink();
+
+    return () => {
+      active = false;
+    };
+  }, [applyBootstrapData, loadScheduleData]);
+
+  useEffect(() => {
+    if (!appStateLoaded || currentUser) {
+      return;
+    }
+
+    if (appStateSaveTimer.current) {
+      clearTimeout(appStateSaveTimer.current);
+    }
+
+    const state: PersistedAppState = {
+      credits,
+      upcoming,
+      waitlist,
+      regularSlotsByMember,
+      weeklyQuotasByMember,
+      regularSlotRequests,
+      weeks: Object.fromEntries(
+        Object.entries(weeks).map(([offset, storedWeek]) => [
+          offset,
+          cloneWeek(storedWeek),
+        ]),
+      ),
+    };
+
+    appStateSaveTimer.current = setTimeout(() => {
+      void fetch(publicAppPath("/api/app-state"), {
+        body: JSON.stringify({ state }),
+        headers: { "Content-Type": "application/json" },
+        method: "PUT",
+      }).catch(() => undefined);
+    }, 600);
+  }, [
+    appStateLoaded,
+    credits,
+    currentUser,
+    regularSlotRequests,
+    regularSlotsByMember,
+    upcoming,
+    waitlist,
+    weeklyQuotasByMember,
+    weeks,
+  ]);
 
   function updateSlot(
     dayIndex: number,
@@ -530,39 +930,107 @@ export default function Home() {
     });
   }
 
-  function submitSignIn(event: FormEvent<HTMLFormElement>) {
+  async function submitSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    queueCorrespondence({
-      kind: "magic-link-requested",
-      actorEmail: signInEmail,
-    });
-    setAuthMessage(`Magic link queued to ${correspondenceEmail}.`);
+    setAuthBusy(true);
+    setAuthMessage("");
+
+    try {
+      const response = await fetch(publicAppPath("/api/auth/request-link"), {
+        body: JSON.stringify({ email: signInEmail }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        setAuthMessage(
+          payload.error ??
+            "We could not send a sign-in link yet. Please try again shortly.",
+        );
+        return;
+      }
+
+      setAuthMessage(`Sign-in link sent to ${signInEmail}.`);
+    } finally {
+      setAuthBusy(false);
+    }
   }
 
-  function submitRegistration(event: FormEvent<HTMLFormElement>) {
+  async function submitRegistration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    queueCorrespondence({
-      kind: "member-access-requested",
-      firstName: registration.firstName,
-      lastName: registration.lastName,
-      email: registration.email,
-      phone: registration.phone,
-    });
-    setPendingRegistration(registration);
+    setAuthBusy(true);
+    setAuthMessage("");
+
+    try {
+      const response = await fetch(publicAppPath("/api/signups"), {
+        body: JSON.stringify(registration),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        member?: DemoMember;
+        notificationSent?: boolean;
+      };
+
+      if (!response.ok) {
+        setAuthMessage(payload.error ?? "Could not submit this request.");
+        return;
+      }
+
+      const savedMember = payload.member;
+
+      if (savedMember) {
+        setMembers((currentMembers) => {
+          const alreadyExists = currentMembers.some(
+            (currentMember) => currentMember.id === savedMember.id,
+          );
+
+          return alreadyExists
+            ? currentMembers.map((currentMember) =>
+                currentMember.id === savedMember.id
+                  ? { ...currentMember, ...savedMember }
+                  : currentMember,
+              )
+            : [...currentMembers, savedMember];
+        });
+      }
+
+      setPendingRegistration(registration);
+      setAuthMessage(
+        payload.notificationSent
+          ? ""
+          : "Your request was saved. Coach notification email is still being configured.",
+      );
+    } finally {
+      setAuthBusy(false);
+    }
   }
 
   function enterDemo(role: DemoRole) {
     setCurrentRole(role);
+    setCurrentUser(null);
     setWeekOffset(0);
     setCoachDayIndex(sessionDayIndexFromIso(todayIsoDate()));
     setSelectedSlot(null);
     setAuthMessage("");
     setPendingRegistration(null);
-    setMessage(role === "coach" ? "Signed in as demo coach." : "Signed in as demo member.");
+    setMessage(
+      role === "coach"
+        ? "Signed in with preview coach access."
+        : "Signed in with preview member access.",
+    );
   }
 
-  function signOut() {
+  async function signOut() {
+    void fetch(publicAppPath("/api/auth/sign-out"), { method: "POST" }).catch(
+      () => undefined,
+    );
     setCurrentRole(null);
+    setCurrentUser(null);
     setSelectedSlot(null);
     setBookingOpen(false);
     setRegularSlotRequestOpen(false);
@@ -571,13 +1039,61 @@ export default function Home() {
     setMessage("Ready for bookings");
   }
 
-  function submitRegularSlotRequest(event: FormEvent<HTMLFormElement>) {
+  async function approveMemberAccess(memberToApprove: DemoMember) {
+    const quota = weeklyQuotasByMember[memberToApprove.id] ?? memberToApprove.weeklyQuota;
+
+    const response = await fetch(
+      publicAppPath(`/api/members/${encodeURIComponent(memberToApprove.id)}`),
+      {
+        body: JSON.stringify({ status: "active", weeklyQuota: quota }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      },
+    );
+
+    if (!response.ok) {
+      setMessage(`Could not approve ${fullName(memberToApprove)} yet.`);
+      return;
+    }
+
+    setMembers((currentMembers) =>
+      currentMembers.map((currentMember) =>
+        currentMember.id === memberToApprove.id
+          ? { ...currentMember, status: "active" }
+          : currentMember,
+      ),
+    );
+    setMessage(`Approved ${fullName(memberToApprove)} for member access.`);
+  }
+
+  async function submitRegularSlotRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const response = await fetch(publicAppPath("/api/regular-slot-requests"), {
+      body: JSON.stringify({
+        effectiveWeek: regularSlotChangeForm.effectiveWeek,
+        memberId: activeMember.id,
+        note: regularSlotChangeForm.note,
+        requestedDay: regularSlotChangeForm.requestedDay,
+        requestedTime: regularSlotChangeForm.requestedTime,
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      id?: string;
+    };
+
+    if (!response.ok) {
+      setMessage(payload.error ?? "Could not send regular slot change request.");
+      return;
+    }
 
     setRegularSlotRequests((requests) => [
       ...requests,
       {
-        id: `regular-request-${Date.now()}`,
+        id: payload.id ?? `regular-request-${Date.now()}`,
         memberName: activeMemberFullName,
         requestedDay: regularSlotChangeForm.requestedDay,
         requestedTime: regularSlotChangeForm.requestedTime,
@@ -684,10 +1200,36 @@ export default function Home() {
     markRegularSlotDraftChanged();
   }
 
-  function saveRegularSlotChanges() {
+  async function saveRegularSlotChanges() {
     if (regularSlotDrafts.length > weeklyQuotaDraft) {
       setRegularSlotDraftNotice(
         `Remove regular slots before saving more than ${weeklyQuotaDraft} sessions per week.`,
+      );
+      return;
+    }
+
+    setRegularSlotDraftNotice("Saving changes...");
+
+    const response = await fetch(
+      publicAppPath(`/api/members/${encodeURIComponent(activeMember.id)}/regular-slots`),
+      {
+        body: JSON.stringify({
+          effectiveFrom: coachRegularSlotForm.effectiveWeek,
+          slots: regularSlotDrafts,
+          weeklyQuota: weeklyQuotaDraft,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "PUT",
+      },
+    );
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      setRegularSlotDraftNotice(
+        payload.error ?? "Could not save regular slot changes yet.",
       );
       return;
     }
@@ -746,12 +1288,31 @@ export default function Home() {
       ...slotsByMember,
       [activeMember.id]: regularSlotDrafts.map((slot) => ({ ...slot })),
     }));
+    if (currentUser) {
+      void loadScheduleData(activeMember.id, weekOffset);
+    }
     setRegularSlotDraftNotice("");
     setCoachRegularSlotOpen(false);
     setMessage(`Saved regular slot changes for ${activeMemberFullName}.`);
   }
 
-  function approveRegularSlotRequest(request: RegularSlotChangeRequest) {
+  async function approveRegularSlotRequest(request: RegularSlotChangeRequest) {
+    const response = await fetch(
+      publicAppPath(
+        `/api/regular-slot-requests/${encodeURIComponent(request.id)}/review`,
+      ),
+      {
+        body: JSON.stringify({ status: "approved" }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    if (!response.ok) {
+      setMessage(`Could not approve ${request.memberName}'s request yet.`);
+      return;
+    }
+
     setRegularSlotRequests((requests) =>
       requests.map((currentRequest) =>
         currentRequest.id === request.id
@@ -759,7 +1320,7 @@ export default function Home() {
           : currentRequest,
       ),
     );
-    const requestMember = demoMembers.find(
+    const requestMember = members.find(
       (demoMember) => fullName(demoMember) === request.memberName,
     );
 
@@ -787,6 +1348,10 @@ export default function Home() {
           return [...currentSlots, nextSlot];
         })(),
       }));
+
+      if (currentUser && requestMember.id === activeMember.id) {
+        void loadScheduleData(requestMember.id, weekOffset);
+      }
     }
     queueCorrespondence({
       kind: "regular-slot-request-approved",
@@ -800,7 +1365,23 @@ export default function Home() {
     );
   }
 
-  function declineRegularSlotRequest(request: RegularSlotChangeRequest) {
+  async function declineRegularSlotRequest(request: RegularSlotChangeRequest) {
+    const response = await fetch(
+      publicAppPath(
+        `/api/regular-slot-requests/${encodeURIComponent(request.id)}/review`,
+      ),
+      {
+        body: JSON.stringify({ status: "declined" }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    if (!response.ok) {
+      setMessage(`Could not decline ${request.memberName}'s request yet.`);
+      return;
+    }
+
     setRegularSlotRequests((requests) =>
       requests.map((currentRequest) =>
         currentRequest.id === request.id
@@ -818,14 +1399,14 @@ export default function Home() {
     setMessage(`Declined ${request.memberName}'s regular slot request.`);
   }
 
-  function bookSlot(
+  async function bookSlot(
     dayIndex: number,
     slotIndex: number,
     options: { coachOverride?: boolean } = {},
   ) {
     const day = week[dayIndex];
     const slot = day.slots[slotIndex];
-    const state = slotState(slot, activeMember.firstName);
+    const state = slotState(slot, activeMember);
 
     if (state === "mine") {
       setMessage(`${activeMemberFullName} is already booked for ${bookingLabel(day)} at ${slot.time}.`);
@@ -833,7 +1414,52 @@ export default function Home() {
     }
 
     if (state === "full" && !options.coachOverride) {
-      joinWaitlist(dayIndex, slotIndex);
+      void joinWaitlist(dayIndex, slotIndex);
+      return;
+    }
+
+    if (currentUser) {
+      const response = await fetch(publicAppPath("/api/bookings"), {
+        body: JSON.stringify({
+          coachOverride: options.coachOverride === true,
+          memberId: activeMember.id,
+          sessionDate: day.isoDate,
+          startTime: slot.time,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        bookingKind?: UpcomingBooking["kind"];
+        error?: string;
+        schedule?: ScheduleData;
+      };
+
+      if (!response.ok || !payload.schedule) {
+        setMessage(payload.error ?? "Could not create this booking.");
+        return;
+      }
+
+      applyScheduleData(payload.schedule, weekOffset);
+
+      const kind =
+        payload.bookingKind ??
+        (options.coachOverride ? "Coach override" : "Regular");
+
+      queueCorrespondence({
+        kind: "booking-created",
+        memberName: activeMemberFullName,
+        bookingDate: bookingLabel(day),
+        time: slot.time,
+        bookingKind: kind,
+      });
+      setSelectedSlot({ weekOffset, dayIndex, slotIndex });
+      setBookingOpen(false);
+      setMessage(
+        options.coachOverride
+          ? `Coach override booked ${activeMemberFullName} for ${bookingLabel(day)} at ${slot.time}.`
+          : `${kind} booked for ${activeMemberFullName} on ${bookingLabel(day)} at ${slot.time}.`,
+      );
       return;
     }
 
@@ -887,12 +1513,57 @@ export default function Home() {
     );
   }
 
-  function cancelSlot(dayIndex: number, slotIndex: number) {
+  async function cancelSlot(dayIndex: number, slotIndex: number) {
     const day = week[dayIndex];
     const slot = day.slots[slotIndex];
     const matchingBooking = upcoming.find(
       (booking) => booking.isoDate === day.isoDate && booking.time === slot.time,
     );
+
+    if (currentUser) {
+      const response = await fetch(publicAppPath("/api/bookings/cancel"), {
+        body: JSON.stringify({
+          memberId: activeMember.id,
+          sessionDate: day.isoDate,
+          startTime: slot.time,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        bookingKind?: UpcomingBooking["kind"];
+        creditIssued?: boolean;
+        error?: string;
+        schedule?: ScheduleData;
+      };
+
+      if (!response.ok || !payload.schedule) {
+        setMessage(payload.error ?? "Could not cancel this booking.");
+        return;
+      }
+
+      applyScheduleData(payload.schedule, weekOffset);
+      queueCorrespondence({
+        kind: "booking-cancelled",
+        memberName: activeMemberFullName,
+        bookingDate: bookingLabel(day),
+        time: slot.time,
+        bookingKind: payload.bookingKind ?? matchingBooking?.kind ?? "Regular",
+      });
+
+      if (payload.creditIssued) {
+        setBookingOpen(true);
+        setMessage(
+          `Cancelled ${bookingLabel(day)} at ${slot.time}. Credit issued. Pick a new slot now or decide later.`,
+        );
+      } else {
+        setMessage(
+          `Cancelled ${payload.bookingKind ?? "Makeup"} booking for ${bookingLabel(day)} at ${slot.time}.`,
+        );
+      }
+
+      return;
+    }
 
     updateSlot(dayIndex, slotIndex, (currentSlot) => ({
       ...currentSlot,
@@ -937,12 +1608,47 @@ export default function Home() {
     }
   }
 
-  function joinWaitlist(dayIndex: number, slotIndex: number) {
+  async function joinWaitlist(dayIndex: number, slotIndex: number) {
     const day = week[dayIndex];
     const slot = day.slots[slotIndex];
     const alreadyJoined = waitlist.some(
       (entry) => entry.isoDate === day.isoDate && entry.time === slot.time,
     );
+
+    if (currentUser) {
+      const response = await fetch(publicAppPath("/api/waitlist"), {
+        body: JSON.stringify({
+          memberId: activeMember.id,
+          sessionDate: day.isoDate,
+          startTime: slot.time,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: alreadyJoined ? "DELETE" : "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        schedule?: ScheduleData;
+      };
+
+      if (!response.ok || !payload.schedule) {
+        setMessage(payload.error ?? "Could not update the waitlist.");
+        return;
+      }
+
+      applyScheduleData(payload.schedule, weekOffset);
+      queueCorrespondence({
+        kind: alreadyJoined ? "waitlist-left" : "waitlist-joined",
+        memberName: activeMemberFullName,
+        bookingDate: bookingLabel(day),
+        time: slot.time,
+      });
+      setMessage(
+        alreadyJoined
+          ? `Left waitlist for ${bookingLabel(day)} at ${slot.time}.`
+          : `Joined waitlist for ${activeMemberFullName} on ${bookingLabel(day)} at ${slot.time}.`,
+      );
+      return;
+    }
 
     if (alreadyJoined) {
       setWaitlist((entries) =>
@@ -986,14 +1692,24 @@ export default function Home() {
   }
 
   function moveWeek(direction: -1 | 1) {
+    const nextOffset = Math.min(3, Math.max(0, weekOffset + direction));
+
     setSelectedSlot(null);
-    setWeekOffset((currentOffset) => Math.min(3, Math.max(0, currentOffset + direction)));
+    setWeekOffset(nextOffset);
+
+    if (currentUser) {
+      void loadScheduleData(activeMember.id, nextOffset);
+    }
   }
 
   function showToday() {
     setWeekOffset(0);
     setCoachDayIndex(sessionDayIndexFromIso(todayIsoDate()));
     setSelectedSlot(null);
+
+    if (currentUser) {
+      void loadScheduleData(activeMember.id, 0);
+    }
   }
 
   if (pendingRegistration) {
@@ -1018,9 +1734,11 @@ export default function Home() {
               {pendingRegistration.email}
             </div>
           </div>
-          <p className="mt-4 rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
-            Approval correspondence is routed to {correspondenceEmail}.
-          </p>
+          {authMessage && (
+            <p className="mt-4 rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+              {authMessage}
+            </p>
+          )}
 
           <button
             className="mt-5 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
@@ -1052,29 +1770,34 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <button
-                className="rounded-lg border border-[var(--mint)] bg-[rgba(0,255,184,0.12)] p-4 text-left hover:bg-[rgba(0,255,184,0.18)]"
-                type="button"
-                onClick={() => enterDemo("member")}
-              >
-                <UsersRound aria-hidden="true" className="mb-4 size-5 text-[var(--mint)]" />
-                <div className="font-semibold">Demo member</div>
-                <div className="mt-1 text-sm text-[var(--muted)]">Maddie Cannon</div>
-              </button>
-              <button
-                className="rounded-lg border border-[var(--orange)] bg-[rgba(255,138,31,0.1)] p-4 text-left hover:bg-[rgba(255,138,31,0.16)]"
-                type="button"
-                onClick={() => enterDemo("coach")}
-              >
-                <ShieldCheck
-                  aria-hidden="true"
-                  className="mb-4 size-5 text-[var(--orange)]"
-                />
-                <div className="font-semibold">Demo coach</div>
-                <div className="mt-1 text-sm text-[var(--muted)]">{demoCoachNames}</div>
-              </button>
-            </div>
+            {previewAccessEnabled && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  className="rounded-lg border border-[var(--mint)] bg-[rgba(0,255,184,0.12)] p-4 text-left hover:bg-[rgba(0,255,184,0.18)]"
+                  type="button"
+                  onClick={() => enterDemo("member")}
+                >
+                  <UsersRound
+                    aria-hidden="true"
+                    className="mb-4 size-5 text-[var(--mint)]"
+                  />
+                  <div className="font-semibold">Preview member</div>
+                  <div className="mt-1 text-sm text-[var(--muted)]">Maddie Cannon</div>
+                </button>
+                <button
+                  className="rounded-lg border border-[var(--orange)] bg-[rgba(255,138,31,0.1)] p-4 text-left hover:bg-[rgba(255,138,31,0.16)]"
+                  type="button"
+                  onClick={() => enterDemo("coach")}
+                >
+                  <ShieldCheck
+                    aria-hidden="true"
+                    className="mb-4 size-5 text-[var(--orange)]"
+                  />
+                  <div className="font-semibold">Preview coach</div>
+                  <div className="mt-1 text-sm text-[var(--muted)]">{coachNames}</div>
+                </button>
+              </div>
+            )}
           </section>
 
           <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl">
@@ -1123,8 +1846,9 @@ export default function Home() {
                 <button
                   className="w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
                   type="submit"
+                  disabled={authBusy}
                 >
-                  Send magic link
+                  Send sign-in link
                 </button>
                 {authMessage && (
                   <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
@@ -1199,6 +1923,7 @@ export default function Home() {
                 <button
                   className="flex w-full items-center justify-center gap-2 rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
                   type="submit"
+                  disabled={authBusy}
                 >
                   <UserPlus aria-hidden="true" className="size-4" />
                   Submit request
@@ -1226,7 +1951,11 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <div className="hidden rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] sm:block">
-              {isCoach ? "Demo coach" : "Demo member"}
+              {currentUser
+                ? `${currentUser.firstName} · ${currentUser.role}`
+                : isCoach
+                  ? "Preview coach"
+                  : "Preview member"}
             </div>
             <button
               className="relative flex size-10 items-center justify-center rounded-md border border-[var(--line)] text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
@@ -1308,16 +2037,16 @@ export default function Home() {
                     <p className="text-sm text-[var(--muted)]">Coach dashboard</p>
                     <h2 className="mt-1 text-2xl font-semibold">Members</h2>
                     <p className="mt-1 text-xs text-[var(--muted)]">
-                      Coaches: {demoCoachNames}
+                      Coaches: {coachNames}
                     </p>
                   </div>
                   <div className="rounded-md border border-[var(--orange)] px-2 py-1 text-sm text-[var(--orange)]">
-                    {demoMembers.length} total
+                    {members.length} total
                   </div>
                 </div>
 
                 <div className="grid max-h-96 gap-2 overflow-y-auto pr-1">
-                  {demoMembers.map((demoMember) => {
+                  {members.map((demoMember) => {
                     const isSelected = demoMember.id === activeMember.id;
 
                     return (
@@ -1337,6 +2066,10 @@ export default function Home() {
                             memberName: fullName(demoMember),
                           }));
                           setMessage("Ready for bookings");
+
+                          if (currentUser) {
+                            void loadScheduleData(demoMember.id, weekOffset);
+                          }
                         }}
                       >
                         <div className="flex items-center justify-between gap-3">
@@ -1437,6 +2170,15 @@ export default function Home() {
             )}
 
             <div className="mt-3 space-y-2">
+              {isCoach && activeMember.status === "pending" && (
+                <button
+                  className="w-full rounded-md bg-[var(--orange)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                  type="button"
+                  onClick={() => approveMemberAccess(activeMember)}
+                >
+                  Approve access
+                </button>
+              )}
               {regularSlotRequests
                 .filter((request) => request.memberName === activeMemberFullName)
                 .map((request) => (
@@ -1679,13 +2421,13 @@ export default function Home() {
                       ? selectedDetails.slot.names.length > 0
                         ? selectedDetails.slot.names.join(", ")
                         : "Open"
-                      : slotState(selectedDetails.slot, activeMember.firstName) === "mine"
+                      : slotState(selectedDetails.slot, activeMember) === "mine"
                         ? "Your booking"
                         : `${bookingRules.slotCapacity - selectedDetails.slot.names.length} spots available`}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {slotState(selectedDetails.slot, activeMember.firstName) === "mine" && (
+                  {slotState(selectedDetails.slot, activeMember) === "mine" && (
                     <button
                       className="rounded-md border border-[rgba(255,78,184,0.55)] px-3 py-2 text-sm text-[var(--pink)] hover:bg-[rgba(255,78,184,0.1)]"
                       type="button"
@@ -1696,7 +2438,7 @@ export default function Home() {
                       Cancel
                     </button>
                   )}
-                  {slotState(selectedDetails.slot, activeMember.firstName) ===
+                  {slotState(selectedDetails.slot, activeMember) ===
                     "available" && (
                     <button
                       className="rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
@@ -1708,7 +2450,7 @@ export default function Home() {
                       {isCoach ? `Add ${activeMember.firstName}` : "Book spot"}
                     </button>
                   )}
-                  {slotState(selectedDetails.slot, activeMember.firstName) === "full" &&
+                  {slotState(selectedDetails.slot, activeMember) === "full" &&
                     isCoach && (
                     <button
                       className="rounded-md bg-[var(--orange)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
@@ -1722,7 +2464,7 @@ export default function Home() {
                       Override add
                     </button>
                   )}
-                  {slotState(selectedDetails.slot, activeMember.firstName) === "full" &&
+                  {slotState(selectedDetails.slot, activeMember) === "full" &&
                     !isCoach && (
                     <button
                       className="rounded-md border border-[var(--olive)] px-3 py-2 text-sm text-[var(--olive)] hover:bg-white/10"
@@ -1757,7 +2499,7 @@ export default function Home() {
           {isCoach ? (
             <div className="grid gap-3 p-4">
               {coachDay.slots.map((slot, slotIndex) => {
-                const state = slotState(slot, activeMember.firstName);
+                const state = slotState(slot, activeMember);
                 const spotsLeft = Math.max(
                   0,
                   bookingRules.slotCapacity - slot.names.length,
@@ -1843,7 +2585,7 @@ export default function Home() {
                   </div>
                   <div className="grid gap-2">
                     {day.slots.map((slot, slotIndex) => {
-                      const state = slotState(slot, activeMember.firstName);
+                      const state = slotState(slot, activeMember);
                       const spotsLeft =
                         bookingRules.slotCapacity - slot.names.length;
 

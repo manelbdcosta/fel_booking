@@ -1,9 +1,8 @@
-import { Resend } from "resend";
-
 import { emailConfig } from "@/lib/email-config";
 
 type CorrespondenceKind =
   | "magic-link-requested"
+  | "sign-in-link-created"
   | "member-access-requested"
   | "regular-slot-change-requested"
   | "regular-slot-assigned"
@@ -34,6 +33,8 @@ export type CorrespondenceEvent = {
   bookingDate?: string;
   bookingKind?: string;
   weeklyQuota?: string;
+  signInLink?: string;
+  reviewLink?: string;
 };
 
 export type BuiltCorrespondenceEmail = {
@@ -46,8 +47,13 @@ type SendCorrespondenceResult =
   | { ok: true; id: string | undefined }
   | { ok: false; status: number; error: string };
 
+type SendCorrespondenceOptions = {
+  to?: string[];
+};
+
 const kindLabels: Record<CorrespondenceKind, string> = {
   "magic-link-requested": "Magic link requested",
+  "sign-in-link-created": "Sign-in link created",
   "member-access-requested": "Member access requested",
   "regular-slot-change-requested": "Regular slot change requested",
   "regular-slot-assigned": "Regular slot assigned",
@@ -79,6 +85,59 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#039;");
 }
 
+async function sendViaResend(
+  email: BuiltCorrespondenceEmail,
+  options: SendCorrespondenceOptions = {},
+): Promise<SendCorrespondenceResult> {
+  if (!process.env.RESEND_API_KEY) {
+    return {
+      ok: false,
+      status: 503,
+      error: "RESEND_API_KEY is not configured.",
+    };
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    body: JSON.stringify({
+      from: emailConfig.from,
+      to: options.to?.length ? options.to : emailConfig.coachNotificationEmails,
+      reply_to: emailConfig.replyTo,
+      subject: email.subject,
+      html: email.html,
+      text: email.text,
+    }),
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+  const responseBody = await response.text();
+
+  if (!response.ok) {
+    console.error("Resend email send failed", {
+      body: responseBody,
+      status: response.status,
+    });
+
+    return {
+      ok: false as const,
+      status: response.status,
+      error: `Resend failed with ${response.status}: ${responseBody}`,
+    };
+  }
+
+  let data: { id?: string } = {};
+
+  try {
+    data = JSON.parse(responseBody) as { id?: string };
+  } catch {
+    data = {};
+  }
+
+  return { ok: true, id: data.id };
+}
+
 function row(label: string, value: unknown) {
   const cleaned = cleanText(value);
 
@@ -102,6 +161,8 @@ function rowsForEvent(event: CorrespondenceEvent) {
     row("Booking time", event.time),
     row("Booking kind", event.bookingKind),
     row("Weekly entitlement", event.weeklyQuota),
+    row("Sign-in link", event.signInLink),
+    row("Review link", event.reviewLink),
     row("Note", event.note),
   ].filter(Boolean) as Array<readonly [string, string]>;
 }
@@ -134,6 +195,8 @@ export function parseCorrespondenceEvent(value: unknown) {
     bookingDate: cleanText(record.bookingDate),
     bookingKind: cleanText(record.bookingKind),
     weeklyQuota: cleanText(record.weeklyQuota),
+    signInLink: cleanText(record.signInLink),
+    reviewLink: cleanText(record.reviewLink),
   } satisfies CorrespondenceEvent;
 }
 
@@ -147,6 +210,57 @@ export function buildCorrespondenceEmail(event: CorrespondenceEvent) {
         `<tr><th align="left" style="padding:8px;border-bottom:1px solid #d7e2e7">${escapeHtml(label)}</th><td style="padding:8px;border-bottom:1px solid #d7e2e7">${escapeHtml(value)}</td></tr>`,
     )
     .join("");
+
+  if (event.kind === "sign-in-link-created") {
+    return {
+      subject: "[FEL Booking] Your sign-in link",
+      text: [
+        "Your Fit East London booking sign-in link",
+        "",
+        "Use this secure link to open your booking account. The link expires in 20 minutes.",
+        "",
+        event.signInLink,
+      ].join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.5;color:#09242c">
+          <h1 style="font-size:20px;margin:0 0 12px">Your sign-in link</h1>
+          <p style="margin:0 0 16px">Use this secure link to open your Fit East London booking account. The link expires in 20 minutes.</p>
+          <p style="margin:0 0 16px"><a href="${escapeHtml(event.signInLink ?? "")}" style="display:inline-block;border-radius:6px;background:#00ffb8;color:#01161c;font-weight:700;padding:10px 14px;text-decoration:none">Open booking app</a></p>
+          <p style="margin:0;color:#49666e;font-size:13px">${escapeHtml(event.signInLink ?? "")}</p>
+        </div>
+      `,
+    } satisfies BuiltCorrespondenceEmail;
+  }
+
+  if (event.kind === "member-access-requested") {
+    const memberName = [event.firstName, event.lastName].filter(Boolean).join(" ");
+
+    return {
+      subject: "[FEL Booking] Member access requested",
+      text: [
+        "A new member requested access.",
+        "",
+        memberName ? `Name: ${memberName}` : "",
+        event.email ? `Email: ${event.email}` : "",
+        event.phone ? `Phone: ${event.phone}` : "",
+        "",
+        "Review this signup in the coach dashboard:",
+        event.reviewLink,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.5;color:#09242c">
+          <h1 style="font-size:20px;margin:0 0 12px">Member access requested</h1>
+          <p style="margin:0 0 16px">A new member requested access.</p>
+          <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;max-width:640px">
+            ${htmlRows}
+          </table>
+          <p style="margin:18px 0 0"><a href="${escapeHtml(event.reviewLink ?? "")}" style="display:inline-block;border-radius:6px;background:#00ffb8;color:#01161c;font-weight:700;padding:10px 14px;text-decoration:none">Review signup</a></p>
+        </div>
+      `,
+    } satisfies BuiltCorrespondenceEmail;
+  }
 
   return {
     subject: `[FEL Booking] ${title}`,
@@ -171,34 +285,9 @@ export function buildCorrespondenceEmail(event: CorrespondenceEvent) {
 
 export async function sendCorrespondenceEmail(
   event: CorrespondenceEvent,
+  options: SendCorrespondenceOptions = {},
 ): Promise<SendCorrespondenceResult> {
-  if (!process.env.RESEND_API_KEY) {
-    return {
-      ok: false,
-      status: 503,
-      error: "RESEND_API_KEY is not configured.",
-    };
-  }
-
-  const resend = new Resend(process.env.RESEND_API_KEY);
   const email = buildCorrespondenceEmail(event);
-  const { data, error } = await resend.emails.send({
-    from: emailConfig.from,
-    to: emailConfig.coachNotificationEmails,
-    replyTo: emailConfig.replyTo,
-    subject: email.subject,
-    text: email.text,
-    html: email.html,
-    tags: [{ name: "category", value: "booking-correspondence" }],
-  });
 
-  if (error) {
-    return {
-      ok: false,
-      status: error.statusCode ?? 502,
-      error: error.message,
-    };
-  }
-
-  return { ok: true, id: data?.id };
+  return sendViaResend(email, options);
 }
