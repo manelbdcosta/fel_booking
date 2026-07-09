@@ -64,6 +64,36 @@ type WaitlistEntry = {
   time: string;
 };
 
+type RegularSlot = {
+  id: string;
+  day: string;
+  time: string;
+};
+
+type RegularSlotChangeRequest = {
+  id: string;
+  memberName: string;
+  requestedDay: string;
+  requestedTime: string;
+  effectiveWeek: string;
+  note: string;
+  status: "pending" | "approved" | "declined";
+};
+
+type RegularSlotChangeForm = {
+  requestedDay: string;
+  requestedTime: string;
+  effectiveWeek: string;
+  note: string;
+};
+
+type CoachRegularSlotForm = {
+  memberName: string;
+  day: string;
+  time: string;
+  effectiveWeek: string;
+};
+
 type RegistrationForm = {
   firstName: string;
   lastName: string;
@@ -118,6 +148,29 @@ const initialUpcoming: UpcomingBooking[] = [
 ];
 
 const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+const weekdayOptions = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+const effectiveWeekOptions = [
+  { label: "Mon 20 Jul", value: "2026-07-20" },
+  { label: "Mon 27 Jul", value: "2026-07-27" },
+  { label: "Mon 3 Aug", value: "2026-08-03" },
+];
+
+const initialRegularSlots: RegularSlot[] = [
+  { id: "regular-1", day: "Monday", time: "06:30" },
+  { id: "regular-2", day: "Thursday", time: "07:00" },
+];
+
+const initialRegularSlotRequests: RegularSlotChangeRequest[] = [
+  {
+    id: "regular-request-1",
+    memberName: "Amira Khan",
+    requestedDay: "Tuesday",
+    requestedTime: "07:30",
+    effectiveWeek: "2026-07-20",
+    note: "Works better with school drop-off this month.",
+    status: "pending",
+  },
+];
 
 const slotTemplates: Array<Array<Omit<ScheduleSlot, "time">>> = [
   [
@@ -240,6 +293,12 @@ function bookingLabel(day: ScheduleDay) {
   return `${day.day} ${day.date}`;
 }
 
+function effectiveWeekLabel(value: string) {
+  return (
+    effectiveWeekOptions.find((option) => option.value === value)?.label ?? value
+  );
+}
+
 export default function Home() {
   const [currentRole, setCurrentRole] = useState<DemoRole | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
@@ -260,6 +319,26 @@ export default function Home() {
   const [credits, setCredits] = useState(initialCredits);
   const [upcoming, setUpcoming] = useState(initialUpcoming);
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
+  const [regularSlots, setRegularSlots] = useState(initialRegularSlots);
+  const [regularSlotRequests, setRegularSlotRequests] = useState(
+    initialRegularSlotRequests,
+  );
+  const [regularSlotRequestOpen, setRegularSlotRequestOpen] = useState(false);
+  const [coachRegularSlotOpen, setCoachRegularSlotOpen] = useState(false);
+  const [regularSlotChangeForm, setRegularSlotChangeForm] =
+    useState<RegularSlotChangeForm>({
+      requestedDay: "Tuesday",
+      requestedTime: "07:30",
+      effectiveWeek: "2026-07-20",
+      note: "",
+    });
+  const [coachRegularSlotForm, setCoachRegularSlotForm] =
+    useState<CoachRegularSlotForm>({
+      memberName: "Amira Khan",
+      day: "Tuesday",
+      time: "07:30",
+      effectiveWeek: "2026-07-20",
+    });
   const [selectedSlot, setSelectedSlot] = useState<SelectedSlot | null>(null);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -335,8 +414,79 @@ export default function Home() {
     setCurrentRole(null);
     setSelectedSlot(null);
     setBookingOpen(false);
+    setRegularSlotRequestOpen(false);
+    setCoachRegularSlotOpen(false);
     setNotificationsOpen(false);
     setMessage("Ready for bookings");
+  }
+
+  function submitRegularSlotRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setRegularSlotRequests((requests) => [
+      ...requests,
+      {
+        id: `regular-request-${Date.now()}`,
+        memberName: "Amira Khan",
+        requestedDay: regularSlotChangeForm.requestedDay,
+        requestedTime: regularSlotChangeForm.requestedTime,
+        effectiveWeek: regularSlotChangeForm.effectiveWeek,
+        note: regularSlotChangeForm.note,
+        status: "pending",
+      },
+    ]);
+    setRegularSlotRequestOpen(false);
+    setRegularSlotChangeForm((current) => ({ ...current, note: "" }));
+    setMessage("Regular slot change request sent to the coaches.");
+  }
+
+  function assignRegularSlot(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setRegularSlots((slots) => [
+      ...slots,
+      {
+        id: `regular-${Date.now()}`,
+        day: coachRegularSlotForm.day,
+        time: coachRegularSlotForm.time,
+      },
+    ]);
+    setCoachRegularSlotOpen(false);
+    setMessage(
+      `Coach assigned ${coachRegularSlotForm.day} ${coachRegularSlotForm.time} from ${effectiveWeekLabel(coachRegularSlotForm.effectiveWeek)}.`,
+    );
+  }
+
+  function approveRegularSlotRequest(request: RegularSlotChangeRequest) {
+    setRegularSlotRequests((requests) =>
+      requests.map((currentRequest) =>
+        currentRequest.id === request.id
+          ? { ...currentRequest, status: "approved" }
+          : currentRequest,
+      ),
+    );
+    setRegularSlots((slots) => [
+      ...slots,
+      {
+        id: `regular-${request.id}`,
+        day: request.requestedDay,
+        time: request.requestedTime,
+      },
+    ]);
+    setMessage(
+      `Approved ${request.memberName}'s regular slot request for ${request.requestedDay} ${request.requestedTime}.`,
+    );
+  }
+
+  function declineRegularSlotRequest(request: RegularSlotChangeRequest) {
+    setRegularSlotRequests((requests) =>
+      requests.map((currentRequest) =>
+        currentRequest.id === request.id
+          ? { ...currentRequest, status: "declined" }
+          : currentRequest,
+      ),
+    );
+    setMessage(`Declined ${request.memberName}'s regular slot request.`);
   }
 
   function bookSlot(
@@ -810,6 +960,94 @@ export default function Home() {
 
           <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold">Regular slots</h2>
+                <p className="text-xs text-[var(--muted)]">
+                  {isCoach ? "Coach managed" : "Coach approval required"}
+                </p>
+              </div>
+              <ShieldCheck aria-hidden="true" className="size-5 text-[var(--mint)]" />
+            </div>
+
+            <div className="space-y-2">
+              {regularSlots.map((slot) => (
+                <div
+                  className="flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-black/20 p-3"
+                  key={slot.id}
+                >
+                  <div className="font-medium">{slot.day}</div>
+                  <div className="text-sm font-semibold text-[var(--mint)]">
+                    {slot.time}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {isCoach ? (
+              <button
+                className="mt-3 w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                type="button"
+                onClick={() => setCoachRegularSlotOpen(true)}
+              >
+                Assign regular slot
+              </button>
+            ) : (
+              <button
+                className="mt-3 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
+                type="button"
+                onClick={() => setRegularSlotRequestOpen(true)}
+              >
+                Request change
+              </button>
+            )}
+
+            <div className="mt-3 space-y-2">
+              {regularSlotRequests
+                .filter((request) => isCoach || request.memberName === "Amira Khan")
+                .map((request) => (
+                  <div
+                    className="rounded-lg border border-[var(--line)] bg-black/20 p-3"
+                    key={request.id}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        {isCoach && (
+                          <div className="text-sm font-medium">{request.memberName}</div>
+                        )}
+                        <div className="text-sm text-[var(--muted)]">
+                          {request.requestedDay} {request.requestedTime} from{" "}
+                          {effectiveWeekLabel(request.effectiveWeek)}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-[var(--line)] px-2 py-1 text-xs text-[var(--muted)]">
+                        {request.status}
+                      </div>
+                    </div>
+                    {isCoach && request.status === "pending" && (
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          className="flex-1 rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                          type="button"
+                          onClick={() => approveRegularSlotRequest(request)}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          className="flex-1 rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--pink)] hover:text-white"
+                          type="button"
+                          onClick={() => declineRegularSlotRequest(request)}
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="text-base font-semibold">Upcoming</h2>
               <CalendarDays aria-hidden="true" className="size-5 text-[var(--orange)]" />
             </div>
@@ -1061,6 +1299,226 @@ export default function Home() {
           </div>
         </section>
       </div>
+
+      {regularSlotRequestOpen && (
+        <div className="fixed inset-0 z-30 flex items-end bg-black/60 p-4 sm:items-center sm:justify-center">
+          <form
+            className="w-full max-w-xl rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl"
+            onSubmit={submitRegularSlotRequest}
+          >
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold">Request regular slot change</h2>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  Coaches review and make all regular slot changes.
+                </p>
+              </div>
+              <button
+                className="flex size-10 items-center justify-center rounded-md text-[var(--muted)] hover:bg-white/10 hover:text-white"
+                type="button"
+                aria-label="Close regular slot request"
+                title="Close"
+                onClick={() => setRegularSlotRequestOpen(false)}
+              >
+                <X aria-hidden="true" className="size-5" />
+              </button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm font-medium" htmlFor="requestedDay">
+                Day
+                <select
+                  className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                  id="requestedDay"
+                  value={regularSlotChangeForm.requestedDay}
+                  onChange={(event) =>
+                    setRegularSlotChangeForm((current) => ({
+                      ...current,
+                      requestedDay: event.target.value,
+                    }))
+                  }
+                >
+                  {weekdayOptions.map((day) => (
+                    <option key={day}>{day}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-sm font-medium" htmlFor="requestedTime">
+                Time
+                <select
+                  className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                  id="requestedTime"
+                  value={regularSlotChangeForm.requestedTime}
+                  onChange={(event) =>
+                    setRegularSlotChangeForm((current) => ({
+                      ...current,
+                      requestedTime: event.target.value,
+                    }))
+                  }
+                >
+                  {bookingRules.slotTimes.map((time) => (
+                    <option key={time}>{time}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <label className="mt-3 block text-sm font-medium" htmlFor="effectiveWeek">
+              Effective week
+              <select
+                className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                id="effectiveWeek"
+                value={regularSlotChangeForm.effectiveWeek}
+                onChange={(event) =>
+                  setRegularSlotChangeForm((current) => ({
+                    ...current,
+                    effectiveWeek: event.target.value,
+                  }))
+                }
+              >
+                {effectiveWeekOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="mt-3 block text-sm font-medium" htmlFor="requestNote">
+              Note
+              <textarea
+                className="mt-1 min-h-24 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 py-2 text-sm outline-none focus:border-[var(--mint)]"
+                id="requestNote"
+                value={regularSlotChangeForm.note}
+                onChange={(event) =>
+                  setRegularSlotChangeForm((current) => ({
+                    ...current,
+                    note: event.target.value,
+                  }))
+                }
+              />
+            </label>
+
+            <button
+              className="mt-4 w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+              type="submit"
+            >
+              Submit request
+            </button>
+          </form>
+        </div>
+      )}
+
+      {coachRegularSlotOpen && (
+        <div className="fixed inset-0 z-30 flex items-end bg-black/60 p-4 sm:items-center sm:justify-center">
+          <form
+            className="w-full max-w-xl rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl"
+            onSubmit={assignRegularSlot}
+          >
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold">Assign regular slot</h2>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  Only coaches can create or change regular slots.
+                </p>
+              </div>
+              <button
+                className="flex size-10 items-center justify-center rounded-md text-[var(--muted)] hover:bg-white/10 hover:text-white"
+                type="button"
+                aria-label="Close regular slot assignment"
+                title="Close"
+                onClick={() => setCoachRegularSlotOpen(false)}
+              >
+                <X aria-hidden="true" className="size-5" />
+              </button>
+            </div>
+
+            <label className="block text-sm font-medium" htmlFor="coachMemberName">
+              Member
+              <input
+                className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                id="coachMemberName"
+                value={coachRegularSlotForm.memberName}
+                onChange={(event) =>
+                  setCoachRegularSlotForm((current) => ({
+                    ...current,
+                    memberName: event.target.value,
+                  }))
+                }
+              />
+            </label>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm font-medium" htmlFor="coachRegularDay">
+                Day
+                <select
+                  className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                  id="coachRegularDay"
+                  value={coachRegularSlotForm.day}
+                  onChange={(event) =>
+                    setCoachRegularSlotForm((current) => ({
+                      ...current,
+                      day: event.target.value,
+                    }))
+                  }
+                >
+                  {weekdayOptions.map((day) => (
+                    <option key={day}>{day}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-sm font-medium" htmlFor="coachRegularTime">
+                Time
+                <select
+                  className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                  id="coachRegularTime"
+                  value={coachRegularSlotForm.time}
+                  onChange={(event) =>
+                    setCoachRegularSlotForm((current) => ({
+                      ...current,
+                      time: event.target.value,
+                    }))
+                  }
+                >
+                  {bookingRules.slotTimes.map((time) => (
+                    <option key={time}>{time}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <label className="mt-3 block text-sm font-medium" htmlFor="coachEffectiveWeek">
+              Effective week
+              <select
+                className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                id="coachEffectiveWeek"
+                value={coachRegularSlotForm.effectiveWeek}
+                onChange={(event) =>
+                  setCoachRegularSlotForm((current) => ({
+                    ...current,
+                    effectiveWeek: event.target.value,
+                  }))
+                }
+              >
+                {effectiveWeekOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              className="mt-4 w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+              type="submit"
+            >
+              Assign slot
+            </button>
+          </form>
+        </div>
+      )}
 
       {bookingOpen && (
         <div className="fixed inset-0 z-30 flex items-end bg-black/60 p-4 sm:items-center sm:justify-center">

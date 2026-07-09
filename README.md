@@ -44,6 +44,7 @@ For the current build, correspondence defaults to `manu@intentionalsets.com`.
 ## Database
 
 The initial schema is in `supabase/migrations/20260709113000_initial_schema.sql`.
+Regular slot change requests are added in `supabase/migrations/20260709120000_regular_slot_change_requests.sql`.
 
 When the Supabase CLI is available:
 
@@ -83,7 +84,8 @@ pnpm build
 
 - Member self-registration creates pending profiles; coach-created members are active immediately.
 - Cancelling a makeup booking loses the credit rather than extending it.
-- Future recurring-slot changes replace future materialized regular bookings without generating credits.
+- Regular recurring slots are coach-managed only. Members may submit change requests, but they cannot create or edit recurring slots themselves.
+- Coach-approved future recurring-slot changes replace future materialized regular bookings without generating credits.
 - Dashboard counters are lifetime totals.
 - Archiving a member cancels future bookings, removes recurring slots, clears waitlists, and preserves history.
 - Coaches can override quota, cutoff, capacity, and closures.

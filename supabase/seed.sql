@@ -35,6 +35,17 @@ values
   ('00000000-0000-4000-8000-000000000109', 4, '06:30', current_date),
   ('00000000-0000-4000-8000-000000000110', 5, '08:00', current_date);
 
+insert into public.regular_slot_change_requests
+  (member_id, requested_weekday, requested_start_time, effective_from, note)
+values
+  (
+    '00000000-0000-4000-8000-000000000101',
+    2,
+    '07:30',
+    (current_date + interval '7 days')::date,
+    'Works better with school drop-off this month.'
+  );
+
 with next_days as (
   select generate_series(current_date, current_date + interval '13 days', interval '1 day')::date as session_date
 )
