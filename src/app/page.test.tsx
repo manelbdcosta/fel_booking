@@ -24,6 +24,15 @@ function renderHome() {
   return userEvent.setup({ advanceTimers: vi.advanceTimersByTime, delay: null });
 }
 
+function jsonResponse(body: unknown, status = 200) {
+  return Promise.resolve(
+    new Response(JSON.stringify(body), {
+      headers: { "Content-Type": "application/json" },
+      status,
+    }),
+  );
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -121,6 +130,90 @@ describe("demo member journey", () => {
 });
 
 describe("demo coach journey", () => {
+  it("lets Manu remove coach accounts", async () => {
+    const user = renderHome();
+    const fetchMock = vi.fn((input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+
+      if (url.includes("/api/auth/me")) {
+        return jsonResponse({ user: null }, 401);
+      }
+
+      if (url.includes("/api/auth/login")) {
+        return jsonResponse({
+          user: {
+            email: "manu@intentionalsets.com",
+            firstName: "Manu",
+            id: "coach-manu",
+            lastName: "",
+            role: "coach",
+          },
+        });
+      }
+
+      if (url.includes("/api/bootstrap")) {
+        return jsonResponse({
+          coachAccounts: [
+            {
+              email: "ben@example.com",
+              firstName: "Ben",
+              id: "coach-ben",
+              lastName: "",
+              status: "active",
+            },
+            {
+              email: "manu@intentionalsets.com",
+              firstName: "Manu",
+              id: "coach-manu",
+              lastName: "",
+              status: "active",
+            },
+          ],
+          coaches: ["Ben", "Manu"],
+          members: [],
+          pendingInvites: [],
+          regularSlotRequests: [],
+          regularSlotsByMember: {},
+          weeklyQuotasByMember: {},
+        });
+      }
+
+      if (url.includes("/api/members/coach-ben")) {
+        return jsonResponse({ ok: true });
+      }
+
+      return jsonResponse({ ok: true });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Home />);
+
+    await user.type(screen.getByLabelText("Email"), "manu@intentionalsets.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+    const loginButtons = screen.getAllByRole("button", { name: "Log in" });
+    await user.click(loginButtons[loginButtons.length - 1]);
+
+    expect(await screen.findByText("Coach team")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove Ben" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove Manu" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Remove Ben" }));
+
+    expect(screen.getByText("Remove Ben?")).toBeTruthy();
+    expect(
+      screen.getByText("They will no longer be able to log in as a coach."),
+    ).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Confirm removal" }));
+
+    expect(await screen.findByText(/Removed Ben from coaches/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove Ben" })).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/members/coach-ben"),
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
   it("lets a coach remove a selected member with confirmation", async () => {
     const user = renderHome();
     render(<Home />);

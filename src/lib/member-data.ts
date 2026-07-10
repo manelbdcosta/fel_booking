@@ -149,6 +149,15 @@ export async function readBootstrapData(db: D1DatabaseBinding) {
   const coaches = memberRows
     .filter((row) => row.role === "coach" && row.status === "active")
     .map((row) => row.first_name);
+  const coachAccounts = memberRows
+    .filter((row) => row.role === "coach")
+    .map((row) => ({
+      id: row.id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      email: row.email,
+      status: row.status,
+    }));
   const weeklyQuotasByMember = Object.fromEntries(
     members.map((member) => [member.id, member.weeklyQuota]),
   );
@@ -191,6 +200,7 @@ export async function readBootstrapData(db: D1DatabaseBinding) {
   }));
 
   return {
+    coachAccounts,
     coaches,
     members,
     pendingInvites,

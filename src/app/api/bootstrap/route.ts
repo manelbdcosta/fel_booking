@@ -16,7 +16,11 @@ export async function GET() {
     const data = await readBootstrapData(db);
 
     if (user.role === "member") {
-      const memberSafeData = { ...data, pendingInvites: undefined };
+      const memberSafeData = {
+        ...data,
+        coachAccounts: undefined,
+        pendingInvites: undefined,
+      };
       const member = data.members.find((currentMember) => currentMember.id === user.id);
       const memberName = member
         ? `${member.firstName} ${member.lastName}`

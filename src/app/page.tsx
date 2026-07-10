@@ -68,6 +68,11 @@ type RemoveMemberPrompt = {
   pendingInvite: boolean;
 };
 
+type RemoveCoachPrompt = {
+  coach: CoachAccount;
+  pendingInvite: boolean;
+};
+
 type Credit = {
   id: string;
   label: string;
@@ -162,6 +167,14 @@ type PendingInvite = {
   createdAt: string;
 };
 
+type CoachAccount = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  status: "active" | "pending";
+};
+
 type DemoMember = {
   id: string;
   firstName: string;
@@ -183,6 +196,7 @@ type AuthUser = {
 };
 
 type BootstrapData = {
+  coachAccounts?: CoachAccount[];
   coaches?: string[];
   members?: DemoMember[];
   pendingInvites?: PendingInvite[];
@@ -230,11 +244,22 @@ const initialWeeklyQuotas = Object.fromEntries(
 ) as Record<string, number>;
 
 const demoCoaches = ["Ben", "Manu", "Ennor", "Mel"];
+const demoCoachAccounts: CoachAccount[] = demoCoaches.map((coachName) => ({
+  id: `coach-${coachName.toLowerCase()}`,
+  firstName: coachName,
+  lastName: "",
+  email:
+    coachName === "Manu"
+      ? "manu@intentionalsets.com"
+      : `${coachName.toLowerCase()}@example.com`,
+  status: "active",
+}));
 const previewAccessEnabled =
   process.env.NEXT_PUBLIC_ENABLE_PREVIEW_ACCESS === "true" ||
   process.env.NODE_ENV === "test";
 
 const correspondenceEmail = "manu@intentionalsets.com";
+const adminCoachEmail = "manu@intentionalsets.com";
 
 function queueCorrespondence(event: Record<string, string | undefined>) {
   if (typeof window === "undefined") {
@@ -455,7 +480,7 @@ function cloneWeek(week: ScheduleDay[]): ScheduleDay[] {
 }
 
 function fullName(person: Pick<DemoMember, "firstName" | "lastName">) {
-  return `${person.firstName} ${person.lastName}`;
+  return `${person.firstName} ${person.lastName}`.trim();
 }
 
 function slotState(slot: ScheduleSlot, activeMember: DemoMember): SlotState {
@@ -595,6 +620,8 @@ export default function Home() {
   });
   const [members, setMembers] = useState<DemoMember[]>(demoMembers);
   const [coaches, setCoaches] = useState(demoCoaches);
+  const [coachAccounts, setCoachAccounts] =
+    useState<CoachAccount[]>(demoCoachAccounts);
   const [weekOffset, setWeekOffset] = useState(0);
   const [weeks, setWeeks] = useState<Record<number, ScheduleDay[]>>({
     0: buildWeek(0),
@@ -657,6 +684,8 @@ export default function Home() {
     useState<SlotClosurePrompt | null>(null);
   const [removeMemberPrompt, setRemoveMemberPrompt] =
     useState<RemoveMemberPrompt | null>(null);
+  const [removeCoachPrompt, setRemoveCoachPrompt] =
+    useState<RemoveCoachPrompt | null>(null);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsRead, setNotificationsRead] = useState(false);
@@ -664,6 +693,9 @@ export default function Home() {
   const [message, setMessage] = useState("Ready for bookings");
   const isCoach = currentRole === "coach";
   const isMissionControl = isCoach && coachMode === "mission";
+  const isAdminCoach =
+    currentUser?.role === "coach" &&
+    currentUser.email.toLowerCase() === adminCoachEmail;
   const coachNames = coaches.join(", ");
   const pendingInvitesByMemberId = new Map(
     pendingInvites.map((invite) => [invite.memberId, invite]),
@@ -826,6 +858,10 @@ export default function Home() {
 
     if (data.coaches?.length) {
       setCoaches(data.coaches);
+    }
+
+    if (data.coachAccounts?.length) {
+      setCoachAccounts(data.coachAccounts);
     }
 
     setPendingInvites(data.pendingInvites ?? []);
@@ -1394,6 +1430,7 @@ export default function Home() {
     setSelectedSlot(null);
     setSlotClosurePrompt(null);
     setRemoveMemberPrompt(null);
+    setRemoveCoachPrompt(null);
     setBookingOpen(false);
     setRegularSlotRequestOpen(false);
     setCoachRegularSlotOpen(false);
@@ -1536,6 +1573,33 @@ export default function Home() {
           ...slotsByMember,
           [savedMember.id]: payload.regularSlots ?? [],
         }));
+      } else {
+        const savedCoach = payload.member;
+
+        setCoachAccounts((currentAccounts) =>
+          currentAccounts.some((account) => account.id === savedCoach.id)
+            ? currentAccounts.map((account) =>
+                account.id === savedCoach.id
+                  ? {
+                      ...account,
+                      email: savedCoach.email ?? account.email,
+                      firstName: savedCoach.firstName,
+                      lastName: savedCoach.lastName,
+                      status: "pending",
+                    }
+                  : account,
+              )
+            : [
+                ...currentAccounts,
+                {
+                  email: savedCoach.email ?? inviteForm.email,
+                  firstName: savedCoach.firstName,
+                  id: savedCoach.id,
+                  lastName: savedCoach.lastName,
+                  status: "pending",
+                },
+              ],
+        );
       }
 
       if (payload.pendingInvite) {
@@ -1735,6 +1799,46 @@ export default function Home() {
     if (currentUser && nextActiveMember) {
       void loadScheduleData(nextActiveMember.id, weekOffset);
     }
+  }
+
+  async function removeCoach(coachToRemove: CoachAccount) {
+    const coachName = fullName(coachToRemove);
+    const response = await fetch(
+      publicAppPath(`/api/members/${encodeURIComponent(coachToRemove.id)}`),
+      {
+        body: JSON.stringify({ status: "archived" }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      },
+    );
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      setMessage(payload.error ?? `Could not remove ${coachName} yet.`);
+      return;
+    }
+
+    setCoachAccounts((currentAccounts) => {
+      const remainingAccounts = currentAccounts.filter(
+        (account) => account.id !== coachToRemove.id,
+      );
+
+      setCoaches(
+        remainingAccounts
+          .filter((account) => account.status === "active")
+          .map((account) => account.firstName),
+      );
+
+      return remainingAccounts;
+    });
+    setPendingInvites((currentInvites) =>
+      currentInvites.filter((invite) => invite.memberId !== coachToRemove.id),
+    );
+    setRemoveCoachPrompt(null);
+    setMessage(`Removed ${coachName} from coaches.`);
   }
 
   function openRegularSlotRequest() {
@@ -3053,6 +3157,65 @@ export default function Home() {
                   Studio calendar and closures
                 </div>
               </button>
+
+              {isAdminCoach && (
+                <div className="mt-3 border-t border-[var(--line)] pt-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold">Coach team</h3>
+                    <span className="text-xs text-[var(--muted)]">
+                      {coachAccounts.length} total
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {coachAccounts.map((coachAccount) => {
+                      const pendingInvite = pendingInvitesByMemberId.get(
+                        coachAccount.id,
+                      );
+                      const canRemoveCoach = coachAccount.id !== currentUser?.id;
+
+                      return (
+                        <div
+                          className="rounded-lg border border-[var(--line)] bg-black/20 p-3"
+                          key={coachAccount.id}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="font-medium">
+                                {fullName(coachAccount)}
+                              </div>
+                              <div className="break-all text-xs text-[var(--muted)]">
+                                {coachAccount.email}
+                              </div>
+                              <div className="mt-1 text-xs text-[var(--orange)]">
+                                {pendingInvite
+                                  ? "Invited, not joined"
+                                  : coachAccount.status === "pending"
+                                    ? "Pending"
+                                    : "Active"}
+                              </div>
+                            </div>
+                            {canRemoveCoach && (
+                              <button
+                                aria-label={`Remove ${fullName(coachAccount)}`}
+                                className="shrink-0 rounded-md border border-[rgba(255,78,184,0.55)] px-3 py-2 text-sm text-[var(--pink)] hover:bg-[rgba(255,78,184,0.1)]"
+                                type="button"
+                                onClick={() =>
+                                  setRemoveCoachPrompt({
+                                    coach: coachAccount,
+                                    pendingInvite: Boolean(pendingInvite),
+                                  })
+                                }
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </section>
           )}
 
@@ -4323,6 +4486,68 @@ export default function Home() {
                 className="flex-1 rounded-md bg-[var(--pink)] px-3 py-2 text-sm font-semibold text-white hover:bg-white hover:text-[#01161c]"
                 type="button"
                 onClick={() => removeMember(removeMemberPrompt.member)}
+              >
+                Confirm removal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {removeCoachPrompt && (
+        <div className="fixed inset-0 z-40 flex items-end bg-black/70 p-4 sm:items-center sm:justify-center">
+          <div className="w-full max-w-lg rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm text-[var(--muted)]">Coach removal</p>
+                <h2 className="mt-1 text-lg font-semibold">
+                  Remove {fullName(removeCoachPrompt.coach)}?
+                </h2>
+              </div>
+              <button
+                className="flex size-10 items-center justify-center rounded-md text-[var(--muted)] hover:bg-white/10 hover:text-white"
+                type="button"
+                aria-label="Cancel coach removal"
+                title="Cancel"
+                onClick={() => setRemoveCoachPrompt(null)}
+              >
+                <X aria-hidden="true" className="size-5" />
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-[rgba(255,78,184,0.45)] bg-[rgba(255,78,184,0.08)] p-3">
+              <div className="flex items-start gap-2 text-sm">
+                <AlertTriangle
+                  aria-hidden="true"
+                  className="mt-0.5 size-4 shrink-0 text-[var(--pink)]"
+                />
+                <div>
+                  <div className="font-medium">
+                    {removeCoachPrompt.pendingInvite
+                      ? "This coach has not joined yet."
+                      : "This archives the coach account."}
+                  </div>
+                  <div className="mt-1 text-[var(--muted)]">
+                    {removeCoachPrompt.pendingInvite
+                      ? "Their pending coach invitation will no longer create an active account."
+                      : "They will no longer be able to log in as a coach."}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <button
+                className="flex-1 rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
+                type="button"
+                onClick={() => setRemoveCoachPrompt(null)}
+              >
+                Keep coach
+              </button>
+              <button
+                className="flex-1 rounded-md bg-[var(--pink)] px-3 py-2 text-sm font-semibold text-white hover:bg-white hover:text-[#01161c]"
+                type="button"
+                onClick={() => removeCoach(removeCoachPrompt.coach)}
               >
                 Confirm removal
               </button>

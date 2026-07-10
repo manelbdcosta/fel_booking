@@ -11,9 +11,13 @@ type MemberParams = {
 type MemberStatus = "pending" | "active" | "archived";
 
 type MemberRow = {
+  email: string;
   id: string;
+  role: "member" | "coach";
   weekly_quota: number;
 };
+
+const adminCoachEmail = "manu@intentionalsets.com";
 
 function isMemberStatus(value: unknown): value is MemberStatus {
   return value === "pending" || value === "active" || value === "archived";
@@ -63,16 +67,70 @@ export async function PATCH(request: Request, { params }: MemberParams) {
   const member = await db
     .prepare(
       `
-        select id, weekly_quota
+        select id, email, role, weekly_quota
         from members
-        where id = ?1 and role = 'member'
+        where id = ?1 and role in ('member', 'coach')
       `,
     )
     .bind(memberId)
     .first<MemberRow>();
 
   if (!member) {
-    return NextResponse.json({ error: "Member not found." }, { status: 404 });
+    return NextResponse.json({ error: "Account not found." }, { status: 404 });
+  }
+
+  if (member.role === "coach") {
+    if (status !== "archived") {
+      return NextResponse.json(
+        { error: "Coach accounts can only be removed from this endpoint." },
+        { status: 400 },
+      );
+    }
+
+    if (user.email.toLowerCase() !== adminCoachEmail) {
+      return NextResponse.json(
+        { error: "Only Manu can remove coach accounts." },
+        { status: 403 },
+      );
+    }
+
+    if (member.id === user.id) {
+      return NextResponse.json(
+        { error: "You cannot remove your own coach account." },
+        { status: 400 },
+      );
+    }
+
+    const statements = [
+      db
+        .prepare(
+          `
+            update members
+            set status = 'archived', updated_at = datetime('now')
+            where id = ?1 and role = 'coach'
+          `,
+        )
+        .bind(memberId),
+      db
+        .prepare(
+          `
+            update account_invites
+            set accepted_at = datetime('now')
+            where member_id = ?1 and accepted_at is null
+          `,
+        )
+        .bind(memberId),
+    ];
+
+    if (db.batch) {
+      await db.batch(statements);
+    } else {
+      for (const statement of statements) {
+        await statement.run();
+      }
+    }
+
+    return NextResponse.json({ ok: true });
   }
 
   if (status === "archived") {
@@ -80,10 +138,10 @@ export async function PATCH(request: Request, { params }: MemberParams) {
     const statements = [
       db
         .prepare(
-          `
-            update members
-            set status = 'archived', updated_at = datetime('now')
-            where id = ?1 and role = 'member'
+        `
+          update members
+          set status = 'archived', updated_at = datetime('now')
+          where id = ?1 and role = 'member'
           `,
         )
         .bind(memberId),
