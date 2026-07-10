@@ -121,6 +121,34 @@ describe("demo member journey", () => {
 });
 
 describe("demo coach journey", () => {
+  it("lets a coach remove a selected member with confirmation", async () => {
+    const user = renderHome();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: /Preview coach/ }));
+    await user.click(screen.getByRole("button", { name: /Emma Richierich/ }));
+    await user.click(screen.getByRole("button", { name: "Remove member" }));
+
+    expect(screen.getByText("Remove Emma Richierich?")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Future bookings, waitlist entries, pending regular-slot requests, and regular slots will be removed.",
+      ),
+    ).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Keep member" }));
+    expect(screen.getByRole("button", { name: /Emma Richierich/ })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Remove member" }));
+    await user.click(screen.getByRole("button", { name: "Confirm removal" }));
+
+    expect(screen.queryByRole("button", { name: /Emma Richierich/ })).toBeNull();
+    expect(
+      await screen.findByText(/Removed Emma Richierich from members/),
+    ).toBeTruthy();
+    expect(screen.getByText("Studio calendar")).toBeTruthy();
+  });
+
   it("lets a coach manage regular slots and override a full booking", async () => {
     const user = renderHome();
     render(<Home />);

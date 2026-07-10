@@ -63,6 +63,11 @@ type SlotClosurePrompt = {
   names: string[];
 };
 
+type RemoveMemberPrompt = {
+  member: DemoMember;
+  pendingInvite: boolean;
+};
+
 type Credit = {
   id: string;
   label: string;
@@ -650,6 +655,8 @@ export default function Home() {
   const [selectedSlot, setSelectedSlot] = useState<SelectedSlot | null>(null);
   const [slotClosurePrompt, setSlotClosurePrompt] =
     useState<SlotClosurePrompt | null>(null);
+  const [removeMemberPrompt, setRemoveMemberPrompt] =
+    useState<RemoveMemberPrompt | null>(null);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsRead, setNotificationsRead] = useState(false);
@@ -1386,6 +1393,7 @@ export default function Home() {
     setCurrentUser(null);
     setSelectedSlot(null);
     setSlotClosurePrompt(null);
+    setRemoveMemberPrompt(null);
     setBookingOpen(false);
     setRegularSlotRequestOpen(false);
     setCoachRegularSlotOpen(false);
@@ -1644,6 +1652,89 @@ export default function Home() {
       ),
     );
     setMessage(`Approved ${fullName(memberToApprove)} for member access.`);
+  }
+
+  async function removeMember(memberToRemove: DemoMember) {
+    const memberName = fullName(memberToRemove);
+    const quota =
+      weeklyQuotasByMember[memberToRemove.id] ?? memberToRemove.weeklyQuota;
+    const response = await fetch(
+      publicAppPath(`/api/members/${encodeURIComponent(memberToRemove.id)}`),
+      {
+        body: JSON.stringify({ status: "archived", weeklyQuota: quota }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH",
+      },
+    );
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      setMessage(payload.error ?? `Could not remove ${memberName} yet.`);
+      return;
+    }
+
+    const remainingMembers = members.filter(
+      (currentMember) => currentMember.id !== memberToRemove.id,
+    );
+
+    setMembers(remainingMembers);
+    setPendingInvites((currentInvites) =>
+      currentInvites.filter((invite) => invite.memberId !== memberToRemove.id),
+    );
+    setRegularSlotsByMember((slotsByMember) => {
+      const remainingSlots = { ...slotsByMember };
+
+      delete remainingSlots[memberToRemove.id];
+
+      return remainingSlots;
+    });
+    setWeeklyQuotasByMember((quotasByMember) => {
+      const remainingQuotas = { ...quotasByMember };
+
+      delete remainingQuotas[memberToRemove.id];
+
+      return remainingQuotas;
+    });
+    setRegularSlotRequests((requests) =>
+      requests.filter((request) => request.memberName !== memberName),
+    );
+    setWeeks((storedWeeks) =>
+      Object.fromEntries(
+        Object.entries(storedWeeks).map(([offset, storedWeek]) => [
+          offset,
+          storedWeek.map((day) => ({
+            ...day,
+            slots: day.slots.map((slot) => ({
+              ...slot,
+              memberIds: slot.memberIds?.filter(
+                (memberId) => memberId !== memberToRemove.id,
+              ),
+              names: slot.names.filter(
+                (name) => name !== memberToRemove.firstName,
+              ),
+            })),
+          })),
+        ]),
+      ) as Record<number, ScheduleDay[]>,
+    );
+    setRemoveMemberPrompt(null);
+    setCoachRegularSlotOpen(false);
+    setBookingOpen(false);
+    setSelectedSlot(null);
+    setCoachMode("mission");
+    setSelectedMemberId(remainingMembers[0]?.id ?? member.id);
+    setMessage(`Removed ${memberName} from members.`);
+
+    const nextActiveMember = remainingMembers.find(
+      (remainingMember) => remainingMember.status === "active",
+    );
+
+    if (currentUser && nextActiveMember) {
+      void loadScheduleData(nextActiveMember.id, weekOffset);
+    }
   }
 
   function openRegularSlotRequest() {
@@ -3144,13 +3235,29 @@ export default function Home() {
             </div>
 
             {isCoach ? (
-              <button
-                className="mt-3 w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
-                type="button"
-                onClick={openRegularSlotManager}
-              >
-                Manage regular slots
-              </button>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <button
+                  className="rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                  type="button"
+                  onClick={openRegularSlotManager}
+                >
+                  Manage regular slots
+                </button>
+                <button
+                  className="rounded-md border border-[rgba(255,78,184,0.55)] px-3 py-2 text-sm font-semibold text-[var(--pink)] hover:bg-[rgba(255,78,184,0.1)]"
+                  type="button"
+                  onClick={() =>
+                    setRemoveMemberPrompt({
+                      member: activeMember,
+                      pendingInvite: Boolean(
+                        pendingInvitesByMemberId.get(activeMember.id),
+                      ),
+                    })
+                  }
+                >
+                  Remove member
+                </button>
+              </div>
             ) : (
               <button
                 className="mt-3 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
@@ -4159,6 +4266,68 @@ export default function Home() {
               Send invite
             </button>
           </form>
+        </div>
+      )}
+
+      {removeMemberPrompt && (
+        <div className="fixed inset-0 z-40 flex items-end bg-black/70 p-4 sm:items-center sm:justify-center">
+          <div className="w-full max-w-lg rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm text-[var(--muted)]">Member removal</p>
+                <h2 className="mt-1 text-lg font-semibold">
+                  Remove {fullName(removeMemberPrompt.member)}?
+                </h2>
+              </div>
+              <button
+                className="flex size-10 items-center justify-center rounded-md text-[var(--muted)] hover:bg-white/10 hover:text-white"
+                type="button"
+                aria-label="Cancel member removal"
+                title="Cancel"
+                onClick={() => setRemoveMemberPrompt(null)}
+              >
+                <X aria-hidden="true" className="size-5" />
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-[rgba(255,78,184,0.45)] bg-[rgba(255,78,184,0.08)] p-3">
+              <div className="flex items-start gap-2 text-sm">
+                <AlertTriangle
+                  aria-hidden="true"
+                  className="mt-0.5 size-4 shrink-0 text-[var(--pink)]"
+                />
+                <div>
+                  <div className="font-medium">
+                    {removeMemberPrompt.pendingInvite
+                      ? "This member has not joined yet."
+                      : "This archives the member account."}
+                  </div>
+                  <div className="mt-1 text-[var(--muted)]">
+                    {removeMemberPrompt.pendingInvite
+                      ? "Their pending invitation will stop appearing for coaches and the invite link will no longer create an active account."
+                      : "Future bookings, waitlist entries, pending regular-slot requests, and regular slots will be removed."}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <button
+                className="flex-1 rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
+                type="button"
+                onClick={() => setRemoveMemberPrompt(null)}
+              >
+                Keep member
+              </button>
+              <button
+                className="flex-1 rounded-md bg-[var(--pink)] px-3 py-2 text-sm font-semibold text-white hover:bg-white hover:text-[#01161c]"
+                type="button"
+                onClick={() => removeMember(removeMemberPrompt.member)}
+              >
+                Confirm removal
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
