@@ -460,7 +460,7 @@ function slotClasses(state: SlotState) {
   }
 
   if (state === "closed") {
-    return `${base} border-[var(--line)] bg-black/30 text-[var(--muted)]`;
+    return `${base} border-[var(--orange)] bg-[rgba(255,138,31,0.16)] text-white`;
   }
 
   return `${base} border-[var(--line)] bg-[var(--panel)] text-white hover:border-[var(--orange)]`;
@@ -2557,6 +2557,33 @@ export default function Home() {
 
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[340px_1fr]">
         <aside className="space-y-5">
+          {isCoach && (
+            <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
+              <div className="mb-3">
+                <p className="text-sm text-[var(--muted)]">Coach dashboard</p>
+                <h2 className="mt-1 text-xl font-semibold">Studio</h2>
+              </div>
+              <button
+                className={`w-full rounded-lg border p-3 text-left ${
+                  isMissionControl
+                    ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)]"
+                    : "border-[var(--line)] bg-black/20 hover:border-[var(--mint)]"
+                }`}
+                type="button"
+                onClick={() => {
+                  setCoachMode("mission");
+                  setSelectedSlot(null);
+                  setMessage("Mission control ready.");
+                }}
+              >
+                <div className="font-medium">Mission control</div>
+                <div className="mt-1 text-xs text-[var(--muted)]">
+                  Studio calendar and closures
+                </div>
+              </button>
+            </section>
+          )}
+
           <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4">
             {isCoach ? (
               <>
@@ -2573,28 +2600,10 @@ export default function Home() {
                   </div>
                 </div>
 
-                <button
-                  className={`mb-3 w-full rounded-lg border p-3 text-left ${
-                    isMissionControl
-                      ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)]"
-                      : "border-[var(--line)] bg-black/20 hover:border-[var(--mint)]"
-                  }`}
-                  type="button"
-                  onClick={() => {
-                    setCoachMode("mission");
-                    setSelectedSlot(null);
-                    setMessage("Mission control ready.");
-                  }}
-                >
-                  <div className="font-medium">Mission control</div>
-                  <div className="mt-1 text-xs text-[var(--muted)]">
-                    Studio calendar and closures
-                  </div>
-                </button>
-
                 <div className="grid max-h-96 gap-2 overflow-y-auto pr-1">
                   {members.map((demoMember) => {
-                    const isSelected = demoMember.id === activeMember.id;
+                    const isSelected =
+                      coachMode === "member" && demoMember.id === activeMember.id;
 
                     return (
                       <button
@@ -3112,10 +3121,12 @@ export default function Home() {
                       return (
                         <button
                           className={`min-h-32 rounded-lg border p-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--mint)] ${
-                            isSelected
-                              ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)]"
-                              : slot.closed
-                                ? "border-[var(--line)] bg-black/30 text-[var(--muted)]"
+                            slot.closed
+                              ? `border-[var(--orange)] bg-[rgba(255,138,31,0.18)] text-white ${
+                                  isSelected ? "ring-2 ring-[var(--mint)]" : ""
+                                }`
+                              : isSelected
+                                ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)]"
                                 : full
                                   ? "border-[rgba(255,78,184,0.55)] bg-[rgba(255,78,184,0.08)] hover:border-[var(--pink)]"
                                   : "border-[var(--line)] bg-[var(--panel)] hover:border-[var(--orange)]"
@@ -3131,7 +3142,7 @@ export default function Home() {
                             <span
                               className={`rounded-md border px-2 py-1 text-xs ${
                                 slot.closed
-                                  ? "border-[var(--line)] text-[var(--muted)]"
+                                  ? "border-[var(--orange)] bg-[rgba(255,138,31,0.12)] text-[var(--orange)]"
                                   : full
                                     ? "border-[rgba(255,78,184,0.55)] text-[var(--pink)]"
                                     : "border-[var(--line)] text-[var(--muted)]"
@@ -3179,10 +3190,12 @@ export default function Home() {
                 return (
                   <button
                     className={`rounded-lg border p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--mint)] ${
-                      isSelected
-                        ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)]"
-                        : state === "closed"
-                          ? "border-[var(--line)] bg-black/30 text-[var(--muted)]"
+                      state === "closed"
+                        ? `border-[var(--orange)] bg-[rgba(255,138,31,0.18)] text-white ${
+                            isSelected ? "ring-2 ring-[var(--mint)]" : ""
+                          }`
+                        : isSelected
+                          ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)]"
                         : state === "full"
                           ? "border-[rgba(255,78,184,0.55)] bg-[rgba(255,78,184,0.08)] hover:border-[var(--pink)]"
                           : "border-[var(--line)] bg-[var(--panel)] hover:border-[var(--orange)]"
@@ -3204,7 +3217,7 @@ export default function Home() {
                           <span
                             className={`rounded-md border px-2 py-1 text-xs ${
                               state === "closed"
-                                ? "border-[var(--line)] text-[var(--muted)]"
+                                ? "border-[var(--orange)] bg-[rgba(255,138,31,0.12)] text-[var(--orange)]"
                                 : state === "full"
                                 ? "border-[rgba(255,78,184,0.55)] text-[var(--pink)]"
                                 : "border-[var(--line)] text-[var(--muted)]"

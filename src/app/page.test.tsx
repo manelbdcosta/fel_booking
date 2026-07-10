@@ -127,7 +127,20 @@ describe("demo coach journey", () => {
 
     await user.click(screen.getByRole("button", { name: /Preview coach/ }));
 
+    expect(screen.getByRole("heading", { name: "Studio" })).toBeTruthy();
     expect(screen.getAllByText("Mission control").length).toBeGreaterThan(0);
+    const membersSection = screen
+      .getByRole("heading", { name: "Members" })
+      .closest("section");
+    expect(membersSection).toBeTruthy();
+    expect(
+      within(membersSection as HTMLElement).queryByText("Mission control"),
+    ).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: /Maddie Cannon/ })
+        .className.includes("border-[var(--mint)]"),
+    ).toBe(false);
     expect(screen.getByText("Studio calendar")).toBeTruthy();
     expect(screen.queryByText(/Coach managed for Maddie Cannon/)).toBeNull();
     expect(screen.getByText("Coaches: Ben, Manu, Ennor, Mel")).toBeTruthy();
