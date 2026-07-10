@@ -1691,6 +1691,38 @@ export default function Home() {
     );
   }
 
+  async function reopenStudioSlot(dayIndex: number, slotIndex: number) {
+    const day = week[dayIndex];
+    const slot = day?.slots[slotIndex];
+
+    if (!day || !slot) {
+      return;
+    }
+
+    const response = await fetch(publicAppPath("/api/slot-closures"), {
+      body: JSON.stringify({
+        sessionDate: day.isoDate,
+        startTime: slot.time,
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "DELETE",
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      setMessage(payload.error ?? "Could not reopen this slot yet.");
+      return;
+    }
+
+    await loadScheduleData(activeMember.id, weekOffset);
+    setMessage(
+      `Reopened ${bookingLabel(day)} at ${slot.time}. Members can book it again.`,
+    );
+  }
+
   async function approveMemberAccess(memberToApprove: DemoMember) {
     const quota = weeklyQuotasByMember[memberToApprove.id] ?? memberToApprove.weeklyQuota;
 
@@ -3731,6 +3763,20 @@ export default function Home() {
                       }
                     >
                       Close slot
+                    </button>
+                  )}
+                  {isMissionControl && selectedDetails.slot.closed && (
+                    <button
+                      className="rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                      type="button"
+                      onClick={() =>
+                        reopenStudioSlot(
+                          selectedDetails.dayIndex,
+                          selectedDetails.slotIndex,
+                        )
+                      }
+                    >
+                      Reopen slot
                     </button>
                   )}
                   {!isMissionControl &&

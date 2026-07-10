@@ -178,6 +178,15 @@ export async function PATCH(request: Request, { params }: MemberParams) {
           `,
         )
         .bind(memberId),
+      db
+        .prepare(
+          `
+            update account_invites
+            set accepted_at = datetime('now')
+            where member_id = ?1 and accepted_at is null
+          `,
+        )
+        .bind(memberId),
     ];
 
     if (db.batch) {

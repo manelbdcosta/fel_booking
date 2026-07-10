@@ -203,3 +203,52 @@ export async function POST(request: Request) {
     ok: true,
   });
 }
+
+export async function DELETE(request: Request) {
+  const db = await requireDatabase();
+  const user = await getSessionUser(db);
+
+  if (!user) {
+    return unauthorizedResponse();
+  }
+
+  if (user.role !== "coach") {
+    return forbiddenResponse();
+  }
+
+  let body: unknown;
+
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  const record =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const sessionDate = cleanSessionDate(record.sessionDate);
+  const startTime = cleanText(record.startTime, 5);
+
+  if (!sessionDate || !validSlotTime(startTime)) {
+    return NextResponse.json(
+      { error: "Session date and time are required." },
+      { status: 400 },
+    );
+  }
+
+  await db
+    .prepare(
+      `
+        delete from slot_closures
+        where session_date = ?1 and start_time = ?2
+      `,
+    )
+    .bind(sessionDate, startTime)
+    .run();
+
+  // Reopening only clears the closure. Members whose bookings were cancelled
+  // when the slot closed keep the credits they were issued and can rebook.
+  await materializeRegularBookingsForWeek(db, normalizeWeekStart(sessionDate));
+
+  return NextResponse.json({ ok: true });
+}
