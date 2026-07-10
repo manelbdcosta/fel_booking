@@ -27,6 +27,24 @@ describe("outbound email correspondence", () => {
     expect(email.html).not.toContain("<script>");
   });
 
+  it("builds an invite email with a setup link", () => {
+    const event = parseCorrespondenceEvent({
+      kind: "account-invited",
+      inviteLink: "https://example.com/?inviteToken=abc&email=maddie@example.com",
+      memberName: "Maddie Cannon",
+      role: "member",
+    });
+
+    expect(event).toBeTruthy();
+
+    const email = buildCorrespondenceEmail(event!);
+
+    expect(email.subject).toBe("[FEL Booking] You're invited");
+    expect(email.text).toContain("Role: member");
+    expect(email.html).toContain("Create password");
+    expect(email.html).toContain("inviteToken=abc&amp;email=maddie@example.com");
+  });
+
   it("rejects unknown event kinds", () => {
     expect(parseCorrespondenceEvent({ kind: "send-anything" })).toBeNull();
   });

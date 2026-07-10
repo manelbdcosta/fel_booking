@@ -1,6 +1,7 @@
 import { emailConfig } from "@/lib/email-config";
 
 type CorrespondenceKind =
+  | "account-invited"
   | "password-reset-requested"
   | "member-access-requested"
   | "regular-slot-change-requested"
@@ -35,6 +36,8 @@ export type CorrespondenceEvent = {
   bookingDate?: string;
   bookingKind?: string;
   weeklyQuota?: string;
+  inviteLink?: string;
+  role?: string;
   reviewLink?: string;
   resetLink?: string;
 };
@@ -54,6 +57,7 @@ type SendCorrespondenceOptions = {
 };
 
 const kindLabels: Record<CorrespondenceKind, string> = {
+  "account-invited": "Account invitation",
   "password-reset-requested": "Password reset requested",
   "member-access-requested": "Member access requested",
   "regular-slot-change-requested": "Regular slot change requested",
@@ -165,6 +169,8 @@ function rowsForEvent(event: CorrespondenceEvent) {
     row("Booking time", event.time),
     row("Booking kind", event.bookingKind),
     row("Weekly entitlement", event.weeklyQuota),
+    row("Role", event.role),
+    row("Invite link", event.inviteLink),
     row("Review link", event.reviewLink),
     row("Reset link", event.resetLink),
     row("Note", event.note),
@@ -201,6 +207,8 @@ export function parseCorrespondenceEvent(value: unknown) {
     bookingDate: cleanText(record.bookingDate),
     bookingKind: cleanText(record.bookingKind),
     weeklyQuota: cleanText(record.weeklyQuota),
+    inviteLink: cleanText(record.inviteLink),
+    role: cleanText(record.role),
     reviewLink: cleanText(record.reviewLink),
     resetLink: cleanText(record.resetLink),
   } satisfies CorrespondenceEvent;
@@ -216,6 +224,30 @@ export function buildCorrespondenceEmail(event: CorrespondenceEvent) {
         `<tr><th align="left" style="padding:8px;border-bottom:1px solid #d7e2e7">${escapeHtml(label)}</th><td style="padding:8px;border-bottom:1px solid #d7e2e7">${escapeHtml(value)}</td></tr>`,
     )
     .join("");
+
+  if (event.kind === "account-invited") {
+    const role = event.role === "coach" ? "coach" : "member";
+
+    return {
+      subject: "[FEL Booking] You're invited",
+      text: [
+        "You've been invited to Fit East London booking.",
+        "",
+        `Role: ${role}`,
+        "Use this secure link to create your password. The link expires in 7 days.",
+        "",
+        event.inviteLink,
+      ].join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.5;color:#09242c">
+          <h1 style="font-size:20px;margin:0 0 12px">You're invited</h1>
+          <p style="margin:0 0 16px">You've been invited to Fit East London booking as a ${escapeHtml(role)}. Use this secure link to create your password. The link expires in 7 days.</p>
+          <p style="margin:0 0 16px"><a href="${escapeHtml(event.inviteLink ?? "")}" style="display:inline-block;border-radius:6px;background:#00ffb8;color:#01161c;font-weight:700;padding:10px 14px;text-decoration:none">Create password</a></p>
+          <p style="margin:0;color:#49666e;font-size:13px">${escapeHtml(event.inviteLink ?? "")}</p>
+        </div>
+      `,
+    } satisfies BuiltCorrespondenceEmail;
+  }
 
   if (event.kind === "password-reset-requested") {
     return {

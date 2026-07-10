@@ -16,13 +16,14 @@ export async function GET() {
     const data = await readBootstrapData(db);
 
     if (user.role === "member") {
+      const memberSafeData = { ...data, pendingInvites: undefined };
       const member = data.members.find((currentMember) => currentMember.id === user.id);
       const memberName = member
         ? `${member.firstName} ${member.lastName}`
         : `${user.firstName} ${user.lastName}`;
 
       return NextResponse.json({
-        ...data,
+        ...memberSafeData,
         members: member ? [member] : [],
         regularSlotRequests: data.regularSlotRequests.filter(
           (request) => request.memberName === memberName,

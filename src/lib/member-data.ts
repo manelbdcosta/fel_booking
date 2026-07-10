@@ -36,6 +36,17 @@ type RegularSlotRequestRow = {
   status: "pending" | "approved" | "declined" | "cancelled";
 };
 
+type AccountInviteRow = {
+  id: string;
+  member_id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  role: MemberRole;
+  expires_at: string;
+  created_at: string;
+};
+
 const weekdaysByNumber: Record<number, string> = {
   1: "Monday",
   2: "Tuesday",
@@ -101,6 +112,26 @@ export async function readBootstrapData(db: D1DatabaseBinding) {
       order by regular_slot_change_requests.created_at desc
     `,
   );
+  const inviteRows = await allRows<AccountInviteRow>(
+    db,
+    `
+      select
+        account_invites.id,
+        account_invites.member_id,
+        members.first_name,
+        members.last_name,
+        account_invites.email,
+        account_invites.role,
+        account_invites.expires_at,
+        account_invites.created_at
+      from account_invites
+      join members on members.id = account_invites.member_id
+      where
+        account_invites.accepted_at is null
+        and members.status <> 'archived'
+      order by account_invites.created_at desc
+    `,
+  );
 
   const members = memberRows
     .filter((row) => row.role === "member")
@@ -149,10 +180,20 @@ export async function readBootstrapData(db: D1DatabaseBinding) {
         ? ("declined" as const)
         : (row.status as "pending" | "approved" | "declined"),
   }));
+  const pendingInvites = inviteRows.map((row) => ({
+    id: row.id,
+    memberId: row.member_id,
+    name: fullName(row),
+    email: row.email,
+    role: row.role,
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+  }));
 
   return {
     coaches,
     members,
+    pendingInvites,
     regularSlotsByMember,
     regularSlotRequests,
     weeklyQuotasByMember,

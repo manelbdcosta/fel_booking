@@ -145,6 +145,17 @@ describe("demo coach journey", () => {
     expect(screen.queryByText(/Coach managed for Maddie Cannon/)).toBeNull();
     expect(screen.getByText("Coaches: Ben, Manu, Ennor, Mel")).toBeTruthy();
     expect(screen.getByText("3 total")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Invite person" }));
+    expect(screen.getByRole("heading", { name: "Invite person" })).toBeTruthy();
+    expect(screen.getByText("Role")).toBeTruthy();
+    expect(screen.getByText("Slot availability")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Invite Monday 06:30 1/4 assigned" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Set later" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Coach" }));
+    expect(screen.queryByText("Slot availability")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Close invite" }));
     expect(screen.getByRole("button", { name: /Emma Richierich/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Gemma Partridge/ })).toBeTruthy();
     expect(

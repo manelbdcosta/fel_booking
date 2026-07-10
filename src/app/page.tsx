@@ -28,8 +28,14 @@ import { publicAppPath } from "@/lib/public-url";
 
 type SlotState = "available" | "mine" | "full" | "closed";
 type DemoRole = "member" | "coach";
+type InviteRole = DemoRole;
 type CoachMode = "mission" | "member";
-type AuthMode = "sign-in" | "register" | "forgot-password" | "reset-password";
+type AuthMode =
+  | "sign-in"
+  | "register"
+  | "forgot-password"
+  | "reset-password"
+  | "accept-invite";
 
 type ScheduleSlot = {
   closed?: boolean;
@@ -133,6 +139,24 @@ type ResetPasswordForm = {
   passwordConfirm: string;
 };
 
+type InviteForm = {
+  name: string;
+  email: string;
+  role: InviteRole;
+  weeklyQuota: string;
+  slots: RegularSlot[];
+};
+
+type PendingInvite = {
+  id: string;
+  memberId: string;
+  name: string;
+  email: string;
+  role: InviteRole;
+  expiresAt: string;
+  createdAt: string;
+};
+
 type DemoMember = {
   id: string;
   firstName: string;
@@ -156,6 +180,7 @@ type AuthUser = {
 type BootstrapData = {
   coaches?: string[];
   members?: DemoMember[];
+  pendingInvites?: PendingInvite[];
   regularSlotsByMember?: Record<string, RegularSlot[]>;
   regularSlotRequests?: RegularSlotChangeRequest[];
   weeklyQuotasByMember?: Record<string, number>;
@@ -476,6 +501,16 @@ function effectiveWeekLabel(value: string) {
   );
 }
 
+function inviteRoleLabel(role: InviteRole) {
+  return role === "coach" ? "Coach" : "Member";
+}
+
+function inviteExpiryLabel(value: string) {
+  const datePart = value.slice(0, 10);
+
+  return datePart ? shortDate(datePart) : "";
+}
+
 function sameRegularSlot(
   left: Pick<RegularSlot, "day" | "time">,
   right: Pick<RegularSlot, "day" | "time">,
@@ -547,6 +582,12 @@ export default function Home() {
     password: "",
     passwordConfirm: "",
   });
+  const [invitePasswordForm, setInvitePasswordForm] = useState<ResetPasswordForm>({
+    email: "",
+    token: "",
+    password: "",
+    passwordConfirm: "",
+  });
   const [members, setMembers] = useState<DemoMember[]>(demoMembers);
   const [coaches, setCoaches] = useState(demoCoaches);
   const [weekOffset, setWeekOffset] = useState(0);
@@ -568,8 +609,25 @@ export default function Home() {
   const [regularSlotRequests, setRegularSlotRequests] = useState(
     initialRegularSlotRequests,
   );
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [regularSlotRequestOpen, setRegularSlotRequestOpen] = useState(false);
   const [coachRegularSlotOpen, setCoachRegularSlotOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteNotice, setInviteNotice] = useState("");
+  const [inviteForm, setInviteForm] = useState<InviteForm>({
+    email: "",
+    name: "",
+    role: "member",
+    slots: [],
+    weeklyQuota: "",
+  });
+  const [inviteSlotDraft, setInviteSlotDraft] = useState<
+    Pick<RegularSlot, "day" | "time">
+  >({
+    day: "Monday",
+    time: "06:30",
+  });
   const [regularSlotDrafts, setRegularSlotDrafts] = useState<RegularSlot[]>([]);
   const [weeklyQuotaDraft, setWeeklyQuotaDraft] = useState(member.weeklyQuota);
   const [regularSlotDraftNotice, setRegularSlotDraftNotice] = useState("");
@@ -600,6 +658,15 @@ export default function Home() {
   const isCoach = currentRole === "coach";
   const isMissionControl = isCoach && coachMode === "mission";
   const coachNames = coaches.join(", ");
+  const pendingInvitesByMemberId = new Map(
+    pendingInvites.map((invite) => [invite.memberId, invite]),
+  );
+  const pendingCoachInvites = pendingInvites.filter(
+    (invite) => invite.role === "coach",
+  );
+  const pendingMemberInvites = pendingInvites.filter(
+    (invite) => invite.role === "member",
+  );
   const activeMember =
     members.find((demoMember) => demoMember.id === selectedMemberId) ?? members[0] ?? member;
   const activeMemberFullName = fullName(activeMember);
@@ -610,6 +677,11 @@ export default function Home() {
     weeklyQuotaDraft !== activeWeeklyQuota ||
     regularSlotSignature(regularSlotDrafts) !== regularSlotSignature(regularSlots);
   const regularSlotCapacity = bookingRules.slotCapacity;
+  const inviteWeeklyQuota = inviteForm.weeklyQuota
+    ? Number(inviteForm.weeklyQuota)
+    : null;
+  const inviteSlotLimit =
+    inviteForm.role === "member" ? (inviteWeeklyQuota ?? 5) : 0;
 
   function regularSlotOccupancy(
     day: string,
@@ -653,6 +725,35 @@ export default function Home() {
     options: { excludeDraftSlotId?: string } = {},
   ) {
     const assigned = regularSlotOccupancy(day, time, options);
+
+    return {
+      assigned,
+      remaining: Math.max(0, regularSlotCapacity - assigned),
+    };
+  }
+
+  function inviteSlotAvailability(day: string, time: string) {
+    const existingCount = Object.entries(regularSlotsByMember).reduce(
+      (count, [memberId, slots]) => {
+        const countedMember = members.find(
+          (currentMember) => currentMember.id === memberId,
+        );
+
+        if (!countedMember) {
+          return count;
+        }
+
+        return (
+          count +
+          slots.filter((slot) => slot.day === day && slot.time === time).length
+        );
+      },
+      0,
+    );
+    const inviteDraftCount = inviteForm.slots.filter(
+      (slot) => slot.day === day && slot.time === time,
+    ).length;
+    const assigned = existingCount + inviteDraftCount;
 
     return {
       assigned,
@@ -719,6 +820,8 @@ export default function Home() {
     if (data.coaches?.length) {
       setCoaches(data.coaches);
     }
+
+    setPendingInvites(data.pendingInvites ?? []);
 
     if (data.regularSlotsByMember) {
       setRegularSlotsByMember(data.regularSlotsByMember);
@@ -945,9 +1048,25 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search);
     const token = params.get("token");
     const resetToken = params.get("resetToken");
+    const inviteToken = params.get("inviteToken");
     const email = params.get("email");
 
     pendingReviewMemberId();
+
+    if (inviteToken && email) {
+      async function prepareInviteAcceptance() {
+        setInvitePasswordForm((current) => ({
+          ...current,
+          email: email ?? "",
+          token: inviteToken ?? "",
+        }));
+        setAuthMode("accept-invite");
+        setAuthMessage("");
+      }
+
+      void prepareInviteAcceptance();
+      return;
+    }
 
     if (resetToken && email) {
       async function preparePasswordReset() {
@@ -1142,6 +1261,44 @@ export default function Home() {
     }
   }
 
+  async function submitAcceptInvite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthMessage("");
+
+    if (invitePasswordForm.password !== invitePasswordForm.passwordConfirm) {
+      setAuthMessage("Passwords do not match.");
+      setAuthBusy(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(publicAppPath("/api/invitations/accept"), {
+        body: JSON.stringify({
+          email: invitePasswordForm.email,
+          password: invitePasswordForm.password,
+          token: invitePasswordForm.token,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        user?: AuthUser;
+      };
+
+      if (!response.ok || !payload.user) {
+        setAuthMessage(payload.error ?? "Could not accept this invitation.");
+        return;
+      }
+
+      window.history.replaceState({}, "", window.location.pathname);
+      await finishAuthenticatedSession(payload.user, "Welcome");
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
   async function submitRegistration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthBusy(true);
@@ -1232,8 +1389,165 @@ export default function Home() {
     setBookingOpen(false);
     setRegularSlotRequestOpen(false);
     setCoachRegularSlotOpen(false);
+    setInviteOpen(false);
     setNotificationsOpen(false);
     setMessage("Ready for bookings");
+  }
+
+  function openInviteDialog() {
+    setInviteForm({
+      email: "",
+      name: "",
+      role: "member",
+      slots: [],
+      weeklyQuota: "",
+    });
+    setInviteSlotDraft({
+      day: "Monday",
+      time: "06:30",
+    });
+    setInviteNotice("");
+    setInviteOpen(true);
+  }
+
+  function updateInviteRole(role: InviteRole) {
+    setInviteForm((current) => ({
+      ...current,
+      role,
+      slots: role === "member" ? current.slots : [],
+      weeklyQuota: role === "member" ? current.weeklyQuota : "",
+    }));
+    setInviteNotice("");
+  }
+
+  function addInviteRegularSlot() {
+    if (inviteForm.role !== "member") {
+      return;
+    }
+
+    if (inviteForm.slots.length >= inviteSlotLimit) {
+      setInviteNotice(
+        inviteWeeklyQuota
+          ? `Remove a regular time or increase sessions per week before adding another one.`
+          : "A maximum of 5 regular times can be set during an invite.",
+      );
+      return;
+    }
+
+    if (inviteForm.slots.some((slot) => sameRegularSlot(slot, inviteSlotDraft))) {
+      setInviteNotice(`${inviteSlotDraft.day} ${inviteSlotDraft.time} is already added.`);
+      return;
+    }
+
+    const availability = inviteSlotAvailability(
+      inviteSlotDraft.day,
+      inviteSlotDraft.time,
+    );
+
+    if (availability.remaining <= 0) {
+      setInviteNotice(
+        `${inviteSlotDraft.day} ${inviteSlotDraft.time} is full (${availability.assigned}/${regularSlotCapacity}).`,
+      );
+      return;
+    }
+
+    setInviteForm((current) => ({
+      ...current,
+      slots: [
+        ...current.slots,
+        {
+          day: inviteSlotDraft.day,
+          id: `invite-regular-${Date.now()}`,
+          time: inviteSlotDraft.time,
+        },
+      ],
+    }));
+    setInviteNotice("Regular time added to this invite.");
+  }
+
+  function removeInviteRegularSlot(slotId: string) {
+    setInviteForm((current) => ({
+      ...current,
+      slots: current.slots.filter((slot) => slot.id !== slotId),
+    }));
+    setInviteNotice("Regular time removed from this invite.");
+  }
+
+  async function submitInvitation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setInviteBusy(true);
+    setInviteNotice("Sending invite...");
+
+    try {
+      const response = await fetch(publicAppPath("/api/invitations"), {
+        body: JSON.stringify({
+          email: inviteForm.email,
+          name: inviteForm.name,
+          role: inviteForm.role,
+          slots: inviteForm.role === "member" ? inviteForm.slots : [],
+          weeklyQuota:
+            inviteForm.role === "member" && inviteForm.weeklyQuota
+              ? inviteForm.weeklyQuota
+              : undefined,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        member?: DemoMember;
+        notificationError?: string | null;
+        notificationSent?: boolean;
+        pendingInvite?: PendingInvite;
+        regularSlots?: RegularSlot[];
+        role?: InviteRole;
+      };
+
+      if (!response.ok || !payload.member) {
+        setInviteNotice(payload.error ?? "Could not send this invite yet.");
+        return;
+      }
+
+      if ((payload.role ?? inviteForm.role) === "member") {
+        const savedMember = payload.member;
+
+        setMembers((currentMembers) =>
+          currentMembers.some((currentMember) => currentMember.id === savedMember.id)
+            ? currentMembers.map((currentMember) =>
+                currentMember.id === savedMember.id
+                  ? { ...currentMember, ...savedMember }
+                  : currentMember,
+              )
+            : [...currentMembers, savedMember],
+        );
+        setWeeklyQuotasByMember((quotasByMember) => ({
+          ...quotasByMember,
+          [savedMember.id]: savedMember.weeklyQuota,
+        }));
+        setRegularSlotsByMember((slotsByMember) => ({
+          ...slotsByMember,
+          [savedMember.id]: payload.regularSlots ?? [],
+        }));
+      }
+
+      if (payload.pendingInvite) {
+        setPendingInvites((currentInvites) => [
+          payload.pendingInvite as PendingInvite,
+          ...currentInvites.filter(
+            (currentInvite) => currentInvite.id !== payload.pendingInvite?.id,
+          ),
+        ]);
+      }
+
+      setInviteOpen(false);
+      setMessage(
+        payload.notificationSent
+          ? `Invitation sent to ${payload.member.email ?? inviteForm.email}.`
+          : `Invitation saved for ${payload.member.email ?? inviteForm.email}, but email failed: ${payload.notificationError ?? "unknown error"}`,
+      );
+    } finally {
+      setInviteBusy(false);
+    }
   }
 
   function requestCloseSlot(dayIndex: number, slotIndex: number) {
@@ -2138,7 +2452,7 @@ export default function Home() {
           </section>
 
           <section className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl">
-            {authMode !== "reset-password" && (
+            {authMode !== "reset-password" && authMode !== "accept-invite" && (
               <div className="mb-4 grid grid-cols-2 gap-2">
                 <button
                   className={`rounded-md px-3 py-2 text-sm font-medium ${
@@ -2329,6 +2643,73 @@ export default function Home() {
                   disabled={authBusy}
                 >
                   Set new password
+                </button>
+                {authMessage && (
+                  <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                    {authMessage}
+                  </p>
+                )}
+              </form>
+            )}
+
+            {authMode === "accept-invite" && (
+              <form className="space-y-3" onSubmit={submitAcceptInvite}>
+                <div>
+                  <p className="text-sm text-[var(--muted)]">Fit East London</p>
+                  <h2 className="text-xl font-semibold">Create your password</h2>
+                </div>
+                <label className="block text-sm font-medium" htmlFor="inviteEmail">
+                  Email
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm text-[var(--muted)] outline-none"
+                    id="inviteEmail"
+                    readOnly
+                    value={invitePasswordForm.email}
+                  />
+                </label>
+                <label className="block text-sm font-medium" htmlFor="invitePassword">
+                  Password
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                    id="invitePassword"
+                    type="password"
+                    required
+                    minLength={8}
+                    value={invitePasswordForm.password}
+                    onChange={(event) =>
+                      setInvitePasswordForm((current) => ({
+                        ...current,
+                        password: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label
+                  className="block text-sm font-medium"
+                  htmlFor="invitePasswordConfirm"
+                >
+                  Confirm password
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                    id="invitePasswordConfirm"
+                    type="password"
+                    required
+                    minLength={8}
+                    value={invitePasswordForm.passwordConfirm}
+                    onChange={(event) =>
+                      setInvitePasswordForm((current) => ({
+                        ...current,
+                        passwordConfirm: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <button
+                  className="w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                  type="submit"
+                  disabled={authBusy}
+                >
+                  Create password
                 </button>
                 {authMessage && (
                   <p className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
@@ -2600,10 +2981,63 @@ export default function Home() {
                   </div>
                 </div>
 
+                <button
+                  className="mb-3 flex w-full items-center justify-center gap-2 rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                  type="button"
+                  onClick={openInviteDialog}
+                >
+                  <UserPlus aria-hidden="true" className="size-4" />
+                  Invite person
+                </button>
+
+                {pendingInvites.length > 0 && (
+                  <div className="mb-3 border-y border-[var(--line)] py-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-semibold">Pending invites</h3>
+                      <span className="text-xs text-[var(--muted)]">
+                        {pendingMemberInvites.length} member
+                        {pendingMemberInvites.length === 1 ? "" : "s"} ·{" "}
+                        {pendingCoachInvites.length} coach
+                        {pendingCoachInvites.length === 1 ? "" : "es"}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {pendingInvites.map((invite) => (
+                        <div
+                          className="grid gap-1 border-t border-[var(--line)] pt-2 first:border-t-0 first:pt-0"
+                          key={invite.id}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm font-medium">{invite.name}</span>
+                            <span className="text-xs text-[var(--mint)]">
+                              {inviteRoleLabel(invite.role)}
+                            </span>
+                          </div>
+                          <div className="break-all text-xs text-[var(--muted)]">
+                            {invite.email}
+                          </div>
+                          <div className="text-xs text-[var(--orange)]">
+                            Invited, not joined
+                            {invite.expiresAt
+                              ? ` · Expires ${inviteExpiryLabel(invite.expiresAt)}`
+                              : ""}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid max-h-96 gap-2 overflow-y-auto pr-1">
                   {members.map((demoMember) => {
                     const isSelected =
                       coachMode === "member" && demoMember.id === activeMember.id;
+                    const pendingInvite = pendingInvitesByMemberId.get(demoMember.id);
+                    const statusLabel = pendingInvite
+                      ? "Invited, not joined"
+                      : demoMember.status === "pending"
+                        ? "Pending approval"
+                        : "Active";
 
                     return (
                       <button
@@ -2636,7 +3070,7 @@ export default function Home() {
                           </span>
                         </div>
                         <div className="mt-1 text-xs text-[var(--muted)]">
-                          {demoMember.status}
+                          {statusLabel}
                         </div>
                       </button>
                     );
@@ -3449,6 +3883,285 @@ export default function Home() {
           </form>
         </div>
       )}
+
+
+      {inviteOpen && (
+        <div className="fixed inset-0 z-30 flex items-end bg-black/60 p-4 sm:items-center sm:justify-center">
+          <form
+            className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl"
+            onSubmit={submitInvitation}
+          >
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm text-[var(--muted)]">Coach dashboard</p>
+                <h2 className="mt-1 text-lg font-semibold">Invite person</h2>
+              </div>
+              <button
+                className="flex size-10 items-center justify-center rounded-md text-[var(--muted)] hover:bg-white/10 hover:text-white"
+                type="button"
+                aria-label="Close invite"
+                title="Close"
+                onClick={() => setInviteOpen(false)}
+              >
+                <X aria-hidden="true" className="size-5" />
+              </button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm font-medium" htmlFor="inviteName">
+                Name
+                <input
+                  className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                  id="inviteName"
+                  required
+                  value={inviteForm.name}
+                  onChange={(event) =>
+                    setInviteForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+
+              <label className="block text-sm font-medium" htmlFor="inviteEmailAddress">
+                Email
+                <input
+                  className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                  id="inviteEmailAddress"
+                  required
+                  type="email"
+                  value={inviteForm.email}
+                  onChange={(event) =>
+                    setInviteForm((current) => ({
+                      ...current,
+                      email: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="mt-3">
+              <div className="mb-2 text-sm font-medium">Role</div>
+              <div className="grid grid-cols-2 gap-2">
+                {(["member", "coach"] as InviteRole[]).map((role) => (
+                  <button
+                    className={`rounded-md border px-3 py-2 text-sm font-medium ${
+                      inviteForm.role === role
+                        ? "border-[var(--mint)] bg-[rgba(0,255,184,0.14)] text-white"
+                        : "border-[var(--line)] bg-black/20 text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
+                    }`}
+                    key={role}
+                    type="button"
+                    onClick={() => updateInviteRole(role)}
+                  >
+                    {inviteRoleLabel(role)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {inviteForm.role === "member" ? (
+              <>
+                <label
+                  className="mt-3 block text-sm font-medium"
+                  htmlFor="inviteWeeklyQuota"
+                >
+                  Sessions per week
+                  <select
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                    id="inviteWeeklyQuota"
+                    value={inviteForm.weeklyQuota}
+                    onChange={(event) => {
+                      const nextQuota = event.target.value;
+
+                      if (nextQuota && inviteForm.slots.length > Number(nextQuota)) {
+                        setInviteNotice(
+                          `Remove regular times before reducing below ${inviteForm.slots.length} sessions per week.`,
+                        );
+                        return;
+                      }
+
+                      setInviteForm((current) => ({
+                        ...current,
+                        weeklyQuota: nextQuota,
+                      }));
+                      setInviteNotice("");
+                    }}
+                  >
+                    <option value="">Set later</option>
+                    {[1, 2, 3, 4, 5].map((quota) => (
+                      <option key={quota} value={String(quota)}>
+                        {quota}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="mt-4">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold">Slot availability</h3>
+                    <div className="text-xs text-[var(--muted)]">
+                      Assigned / {regularSlotCapacity}
+                    </div>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-5">
+                    {weekdayOptions.map((day) => (
+                      <div
+                        className="rounded-lg border border-[var(--line)] bg-black/20 p-2"
+                        key={day}
+                      >
+                        <div className="mb-2 text-xs font-semibold uppercase text-[var(--muted)]">
+                          {day}
+                        </div>
+                        <div className="space-y-1">
+                          {bookingRules.slotTimes.map((time) => {
+                            const availability = inviteSlotAvailability(day, time);
+                            const selected =
+                              inviteSlotDraft.day === day &&
+                              inviteSlotDraft.time === time;
+                            const added = inviteForm.slots.some((slot) =>
+                              sameRegularSlot(slot, { day, time }),
+                            );
+                            const full = availability.remaining <= 0 && !added;
+
+                            return (
+                              <button
+                                aria-label={`Invite ${day} ${time} ${availability.assigned}/${regularSlotCapacity} assigned`}
+                                className={`flex min-h-9 w-full items-center justify-between rounded-md border px-2 text-xs transition-colors ${
+                                  selected
+                                    ? "border-[var(--mint)] bg-[rgba(0,255,184,0.16)] text-white"
+                                    : full
+                                      ? "border-[rgba(255,78,184,0.45)] bg-[rgba(255,78,184,0.08)] text-[var(--muted)]"
+                                      : added
+                                        ? "border-[var(--orange)] bg-[rgba(255,138,31,0.12)] text-white"
+                                        : "border-[var(--line)] bg-[#09242c] text-white hover:border-[var(--mint)]"
+                                }`}
+                                key={time}
+                                type="button"
+                                disabled={full}
+                                onClick={() => setInviteSlotDraft({ day, time })}
+                              >
+                                <span>{time}</span>
+                                <span
+                                  className={
+                                    full ? "text-[var(--pink)]" : "text-[var(--mint)]"
+                                  }
+                                >
+                                  {availability.assigned}/{regularSlotCapacity}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                  <label className="block text-sm font-medium" htmlFor="inviteSlotDay">
+                    Regular day
+                    <select
+                      className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                      id="inviteSlotDay"
+                      value={inviteSlotDraft.day}
+                      onChange={(event) =>
+                        setInviteSlotDraft((current) => ({
+                          ...current,
+                          day: event.target.value,
+                        }))
+                      }
+                    >
+                      {weekdayOptions.map((day) => (
+                        <option key={day}>{day}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block text-sm font-medium" htmlFor="inviteSlotTime">
+                    Regular time
+                    <select
+                      className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-[#09242c] px-3 text-sm outline-none focus:border-[var(--mint)]"
+                      id="inviteSlotTime"
+                      value={inviteSlotDraft.time}
+                      onChange={(event) =>
+                        setInviteSlotDraft((current) => ({
+                          ...current,
+                          time: event.target.value,
+                        }))
+                      }
+                    >
+                      {bookingRules.slotTimes.map((time) => (
+                        <option key={time}>{time}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <button
+                    className="min-h-11 rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] enabled:hover:border-[var(--mint)] enabled:hover:text-white disabled:opacity-45"
+                    type="button"
+                    disabled={inviteForm.slots.length >= inviteSlotLimit}
+                    onClick={addInviteRegularSlot}
+                  >
+                    Add time
+                  </button>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {inviteForm.slots.map((slot) => (
+                    <div
+                      className="flex items-center justify-between gap-3 border-t border-[var(--line)] pt-2 first:border-t-0 first:pt-0"
+                      key={slot.id}
+                    >
+                      <div>
+                        <div className="text-sm font-medium">
+                          {slot.day} {slot.time}
+                        </div>
+                        <div className="text-xs text-[var(--muted)]">
+                          Regular time
+                        </div>
+                      </div>
+                      <button
+                        className="rounded-md border border-[rgba(255,78,184,0.55)] px-3 py-2 text-sm text-[var(--pink)] hover:bg-[rgba(255,78,184,0.1)]"
+                        type="button"
+                        onClick={() => removeInviteRegularSlot(slot.id)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  {inviteForm.slots.length === 0 && (
+                    <p className="border-t border-[var(--line)] pt-2 text-sm text-[var(--muted)]">
+                      No regular times added yet.
+                    </p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="mt-3 rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                Coach invites create a coach account and send a password setup link.
+              </p>
+            )}
+
+            {inviteNotice && (
+              <p className="mt-3 rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                {inviteNotice}
+              </p>
+            )}
+
+            <button
+              className="mt-4 w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] enabled:hover:bg-white disabled:opacity-45"
+              type="submit"
+              disabled={inviteBusy}
+            >
+              Send invite
+            </button>
+          </form>
+        </div>
+      )}
+
 
       {slotClosurePrompt && (
         <div className="fixed inset-0 z-40 flex items-end bg-black/70 p-4 sm:items-center sm:justify-center">
