@@ -12,6 +12,7 @@ describe("outbound email correspondence", () => {
       memberName: "Maddie Cannon",
       requestedDay: "Friday",
       requestedTime: "08:30",
+      reviewLink: "https://fiteast-scheduling.intentionalsets.com/?reviewRequest=req-1&reviewMember=maddie",
       note: "<script>alert('x')</script>",
     });
 
@@ -23,6 +24,9 @@ describe("outbound email correspondence", () => {
       "[FEL Booking] Regular slot change requested",
     );
     expect(email.text).toContain("Member: Maddie Cannon");
+    expect(email.text).toContain("Review this request in the coach dashboard");
+    expect(email.html).toContain("Review request");
+    expect(email.html).toContain("reviewRequest=req-1&amp;reviewMember=maddie");
     expect(email.html).toContain("&lt;script&gt;");
     expect(email.html).not.toContain("<script>");
   });

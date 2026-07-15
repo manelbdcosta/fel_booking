@@ -106,13 +106,16 @@ describe("demo member journey", () => {
     ).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /06:30.*Your booking/ }));
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Cancel booking" }));
 
     expect(
       screen.getByText(
-        "Cancelled Mon 6 Jul at 06:30. Credit issued. Pick a new slot now or decide later.",
+        "Cancelled Mon 6 Jul at 06:30. Credit issued. It expires 3 Aug.",
       ),
     ).toBeTruthy();
+    expect(screen.getByText("Book a new session now?")).toBeTruthy();
+    expect(screen.getByText("Your credit expires 3 Aug.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Book now" }));
     expect(screen.getByText("Book a session")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Close booking" }));
 
@@ -242,6 +245,77 @@ describe("demo coach journey", () => {
     expect(screen.getByText("Studio calendar")).toBeTruthy();
   });
 
+  it("lets a coach remove a pending invited member", async () => {
+    const user = renderHome();
+    const fetchMock = vi.fn(
+      (
+        input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1],
+      ) => {
+        const url = String(input);
+
+        if (url.includes("/api/invitations") && init?.method === "POST") {
+          return jsonResponse(
+            {
+              member: {
+                email: "nia@example.com",
+                firstName: "Nia",
+                id: "invited-member",
+                lastName: "Guest",
+                status: "pending",
+                weeklyQuota: 1,
+              },
+              notificationSent: true,
+              pendingInvite: {
+                createdAt: "2026-07-09T08:00:00Z",
+                email: "nia@example.com",
+                expiresAt: "2026-07-16T08:00:00Z",
+                id: "invite-nia",
+                memberId: "invited-member",
+                name: "Nia Guest",
+                role: "member",
+              },
+              regularSlots: [],
+              role: "member",
+            },
+            201,
+          );
+        }
+
+        if (url.includes("/api/members/invited-member")) {
+          return jsonResponse({ ok: true });
+        }
+
+        return jsonResponse({ ok: true });
+      },
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: /Preview coach/ }));
+    await user.click(screen.getByRole("button", { name: "Invite person" }));
+    await user.type(screen.getByLabelText("Name"), "Nia Guest");
+    await user.type(screen.getByLabelText("Email"), "nia@example.com");
+    await user.click(screen.getByRole("button", { name: "Send invite" }));
+
+    expect(await screen.findByText(/Invitation sent to nia@example.com/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /Nia Guest/ }));
+    await user.click(screen.getByRole("button", { name: "Remove member" }));
+
+    expect(screen.getByText("This member has not joined yet.")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Confirm removal" }));
+
+    expect(await screen.findByText(/Removed Nia Guest from members/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Nia Guest/ })).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/members/invited-member"),
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
   it("lets a coach manage regular slots and override a full booking", async () => {
     const user = renderHome();
     render(<Home />);
@@ -259,7 +333,7 @@ describe("demo coach journey", () => {
     ).toBeNull();
     expect(
       screen
-        .getByRole("button", { name: /Maddie Cannon/ })
+        .getByRole("button", { name: /Maddie Cannon.*2x.*Active/ })
         .className.includes("border-[var(--mint)]"),
     ).toBe(false);
     expect(screen.getByText("Studio calendar")).toBeTruthy();
@@ -277,6 +351,17 @@ describe("demo coach journey", () => {
     await user.click(screen.getByRole("button", { name: "Coach" }));
     expect(screen.queryByText("Slot availability")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Close invite" }));
+    expect(screen.getByText("Regular slot requests")).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", {
+        name: /Maddie Cannon.*Monday 06:30 to Tuesday 07:30/,
+      }),
+    );
+    expect(screen.getByText("Requested slot")).toBeTruthy();
+    expect(screen.getByText("0/4 already assigned")).toBeTruthy();
+    expect(screen.getByText("0 left after approval")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Approve request" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Mission control/ }));
     expect(screen.getByRole("button", { name: /Emma Richierich/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Gemma Partridge/ })).toBeTruthy();
     expect(
@@ -297,13 +382,21 @@ describe("demo coach journey", () => {
     expect(screen.getByText("This slot has bookings.")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Keep open" }));
 
+    await user.click(screen.getAllByRole("button", { name: /08:30.*Open/ })[0]);
+    await user.click(screen.getByRole("button", { name: "Close slot" }));
+    expect(screen.getByText(/Closed .* at 08:30/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Reopen slot" }));
+    expect(screen.getByText(/Reopened .* at 08:30/)).toBeTruthy();
+
     await user.click(screen.getByRole("button", { name: /Emma Richierich/ }));
     expect(screen.getByText("Coach schedule")).toBeTruthy();
     expect(screen.getByText("Today's sessions")).toBeTruthy();
     expect(screen.getByText(/Managing Emma Richierich/)).toBeTruthy();
     expect(screen.getByText(/Coach managed for Emma Richierich/)).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: /Maddie Cannon/ }));
+    await user.click(
+      screen.getByRole("button", { name: /Maddie Cannon.*2x.*Active/ }),
+    );
     await user.click(screen.getByRole("button", { name: "Manage regular slots" }));
     expect(screen.getByText(/2\/2 assigned for Maddie Cannon/)).toBeTruthy();
     expect(screen.getByText("Slot availability")).toBeTruthy();

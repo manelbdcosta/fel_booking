@@ -300,6 +300,37 @@ export function buildCorrespondenceEmail(event: CorrespondenceEvent) {
     } satisfies BuiltCorrespondenceEmail;
   }
 
+  if (event.kind === "regular-slot-change-requested") {
+    const text = [
+      "A member requested a regular slot change.",
+      "",
+      ...textRows,
+    ];
+
+    if (event.reviewLink) {
+      text.push("", "Review this request in the coach dashboard:", event.reviewLink);
+    }
+
+    return {
+      subject: "[FEL Booking] Regular slot change requested",
+      text: text.join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.5;color:#09242c">
+          <h1 style="font-size:20px;margin:0 0 12px">Regular slot change requested</h1>
+          <p style="margin:0 0 16px">A member requested a regular slot change.</p>
+          <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;max-width:640px">
+            ${htmlRows}
+          </table>
+          ${
+            event.reviewLink
+              ? `<p style="margin:18px 0 0"><a href="${escapeHtml(event.reviewLink)}" style="display:inline-block;border-radius:6px;background:#00ffb8;color:#01161c;font-weight:700;padding:10px 14px;text-decoration:none">Review request</a></p>`
+              : ""
+          }
+        </div>
+      `,
+    } satisfies BuiltCorrespondenceEmail;
+  }
+
   if (event.kind === "slot-closed") {
     return {
       subject: "[FEL Booking] Session closed",

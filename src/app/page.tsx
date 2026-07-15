@@ -63,6 +63,12 @@ type SlotClosurePrompt = {
   names: string[];
 };
 
+type CreditDecisionPrompt = {
+  bookingDate: string;
+  expiry: string;
+  time: string;
+};
+
 type RemoveMemberPrompt = {
   member: DemoMember;
   pendingInvite: boolean;
@@ -572,6 +578,26 @@ function pendingReviewMemberId() {
   }
 }
 
+function pendingReviewRequestId() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const reviewRequestId = params.get("reviewRequest");
+
+  try {
+    if (reviewRequestId) {
+      window.localStorage.setItem("fel_review_request", reviewRequestId);
+      return reviewRequestId;
+    }
+
+    return window.localStorage.getItem("fel_review_request");
+  } catch {
+    return reviewRequestId;
+  }
+}
+
 function clearPendingReviewMemberId(memberId: string) {
   if (typeof window === "undefined") {
     return;
@@ -580,6 +606,20 @@ function clearPendingReviewMemberId(memberId: string) {
   try {
     if (window.localStorage.getItem("fel_review_member") === memberId) {
       window.localStorage.removeItem("fel_review_member");
+    }
+  } catch {
+    // Local storage can be unavailable in restrictive browser modes.
+  }
+}
+
+function clearPendingReviewRequestId(requestId: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    if (window.localStorage.getItem("fel_review_request") === requestId) {
+      window.localStorage.removeItem("fel_review_request");
     }
   } catch {
     // Local storage can be unavailable in restrictive browser modes.
@@ -686,6 +726,10 @@ export default function Home() {
     useState<RemoveMemberPrompt | null>(null);
   const [removeCoachPrompt, setRemoveCoachPrompt] =
     useState<RemoveCoachPrompt | null>(null);
+  const [creditDecisionPrompt, setCreditDecisionPrompt] =
+    useState<CreditDecisionPrompt | null>(null);
+  const [selectedRegularSlotRequestId, setSelectedRegularSlotRequestId] =
+    useState<string | null>(null);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsRead, setNotificationsRead] = useState(false);
@@ -706,6 +750,18 @@ export default function Home() {
   const pendingMemberInvites = pendingInvites.filter(
     (invite) => invite.role === "member",
   );
+  const pendingRegularSlotRequests = regularSlotRequests.filter(
+    (request) => request.status === "pending",
+  );
+  const selectedRegularSlotRequest =
+    regularSlotRequests.find(
+      (request) => request.id === selectedRegularSlotRequestId,
+    ) ?? null;
+  const selectedRegularSlotRequestMember = selectedRegularSlotRequest
+    ? members.find(
+        (demoMember) => fullName(demoMember) === selectedRegularSlotRequest.memberName,
+      ) ?? null
+    : null;
   const activeMember =
     members.find((demoMember) => demoMember.id === selectedMemberId) ?? members[0] ?? member;
   const activeMemberFullName = fullName(activeMember);
@@ -799,6 +855,78 @@ export default function Home() {
       remaining: Math.max(0, regularSlotCapacity - assigned),
     };
   }
+
+  function regularSlotAssignmentCount(day?: string, time?: string) {
+    if (!day || !time) {
+      return 0;
+    }
+
+    return Object.entries(regularSlotsByMember).reduce(
+      (count, [memberId, slots]) => {
+        const countedMember = members.find(
+          (currentMember) => currentMember.id === memberId,
+        );
+
+        if (!countedMember) {
+          return count;
+        }
+
+        return (
+          count + slots.filter((slot) => slot.day === day && slot.time === time).length
+        );
+      },
+      0,
+    );
+  }
+
+  const selectedRegularSlotReview = selectedRegularSlotRequest
+    ? (() => {
+        const requesterSlots = selectedRegularSlotRequestMember
+          ? regularSlotsByMember[selectedRegularSlotRequestMember.id] ?? []
+          : [];
+        const requesterHasRequestedSlot = requesterSlots.some((slot) =>
+          sameRegularSlot(slot, {
+            day: selectedRegularSlotRequest.requestedDay,
+            time: selectedRegularSlotRequest.requestedTime,
+          }),
+        );
+        const requesterHasAbandonedSlot =
+          Boolean(
+            selectedRegularSlotRequest.abandonedDay &&
+              selectedRegularSlotRequest.abandonedTime,
+          ) &&
+          requesterSlots.some((slot) =>
+            sameRegularSlot(slot, {
+              day: selectedRegularSlotRequest.abandonedDay ?? "",
+              time: selectedRegularSlotRequest.abandonedTime ?? "",
+            }),
+          );
+        const requestedAssigned = regularSlotAssignmentCount(
+          selectedRegularSlotRequest.requestedDay,
+          selectedRegularSlotRequest.requestedTime,
+        );
+        const abandonedAssigned = regularSlotAssignmentCount(
+          selectedRegularSlotRequest.abandonedDay,
+          selectedRegularSlotRequest.abandonedTime,
+        );
+        const requestedAfter = Math.min(
+          regularSlotCapacity,
+          requestedAssigned + (requesterHasRequestedSlot ? 0 : 1),
+        );
+        const abandonedAfter = Math.max(
+          0,
+          abandonedAssigned - (requesterHasAbandonedSlot ? 1 : 0),
+        );
+
+        return {
+          abandonedAfter,
+          abandonedAssigned,
+          requestedAfter,
+          requestedAssigned,
+          requestedRemainingAfter: Math.max(0, regularSlotCapacity - requestedAfter),
+        };
+      })()
+    : null;
 
   const week = weeks[weekOffset] ?? buildWeek(weekOffset);
   const coachDay = week[coachDayIndex] ?? week[0];
@@ -937,12 +1065,25 @@ export default function Home() {
         applyBootstrapData(bootstrapData);
       }
 
+      const reviewRequestId = pendingReviewRequestId();
+      const reviewRequest =
+        user.role === "coach" && reviewRequestId
+          ? bootstrapData?.regularSlotRequests?.find(
+              (request) => request.id === reviewRequestId,
+            )
+          : null;
       const reviewMemberId = pendingReviewMemberId();
       const reviewMember =
-        user.role === "coach" && reviewMemberId
-          ? bootstrapData?.members?.find(
-              (loadedMember) => loadedMember.id === reviewMemberId,
-            )
+        user.role === "coach"
+          ? reviewRequest
+            ? bootstrapData?.members?.find(
+                (loadedMember) => fullName(loadedMember) === reviewRequest.memberName,
+              )
+            : reviewMemberId
+              ? bootstrapData?.members?.find(
+                  (loadedMember) => loadedMember.id === reviewMemberId,
+                )
+              : null
           : null;
 
       if (user.role === "coach") {
@@ -959,11 +1100,18 @@ export default function Home() {
           clearPendingReviewMemberId(reviewMember.id);
         }
 
+        if (reviewRequest) {
+          setSelectedRegularSlotRequestId(reviewRequest.id);
+          clearPendingReviewRequestId(reviewRequest.id);
+        }
+
         void loadScheduleData(scheduleMemberId, 0);
       }
 
       setMessage(
-        reviewMember
+        reviewRequest
+          ? `Reviewing ${reviewRequest.memberName}'s slot request.`
+          : reviewMember
           ? `Reviewing ${fullName(reviewMember)}.`
           : `${messagePrefix} ${user.firstName}.`,
       );
@@ -1035,12 +1183,26 @@ export default function Home() {
         }
 
         if (signedInUser) {
+          const reviewRequestId = pendingReviewRequestId();
+          const reviewRequest =
+            signedInUser.role === "coach" && reviewRequestId
+              ? bootstrapData?.regularSlotRequests?.find(
+                  (request) => request.id === reviewRequestId,
+                )
+              : null;
           const reviewMemberId = pendingReviewMemberId();
           const reviewMember =
-            signedInUser.role === "coach" && reviewMemberId
-              ? bootstrapData?.members?.find(
-                  (loadedMember) => loadedMember.id === reviewMemberId,
-                )
+            signedInUser.role === "coach"
+              ? reviewRequest
+                ? bootstrapData?.members?.find(
+                    (loadedMember) =>
+                      fullName(loadedMember) === reviewRequest.memberName,
+                  )
+                : reviewMemberId
+                  ? bootstrapData?.members?.find(
+                      (loadedMember) => loadedMember.id === reviewMemberId,
+                    )
+                  : null
               : null;
 
           if (signedInUser.role === "coach") {
@@ -1057,6 +1219,16 @@ export default function Home() {
             if (reviewMember) {
               setSelectedMemberId(reviewMember.id);
               clearPendingReviewMemberId(reviewMember.id);
+            }
+
+            if (reviewRequest) {
+              setSelectedRegularSlotRequestId(reviewRequest.id);
+              clearPendingReviewRequestId(reviewRequest.id);
+            }
+
+            if (reviewRequest) {
+              setMessage(`Reviewing ${reviewRequest.memberName}'s slot request.`);
+            } else if (reviewMember) {
               setMessage(`Reviewing ${fullName(reviewMember)}.`);
             }
 
@@ -1095,6 +1267,7 @@ export default function Home() {
     const email = params.get("email");
 
     pendingReviewMemberId();
+    pendingReviewRequestId();
 
     if (inviteToken && email) {
       async function prepareInviteAcceptance() {
@@ -1431,6 +1604,8 @@ export default function Home() {
     setSlotClosurePrompt(null);
     setRemoveMemberPrompt(null);
     setRemoveCoachPrompt(null);
+    setCreditDecisionPrompt(null);
+    setSelectedRegularSlotRequestId(null);
     setBookingOpen(false);
     setRegularSlotRequestOpen(false);
     setCoachRegularSlotOpen(false);
@@ -1649,6 +1824,18 @@ export default function Home() {
       return;
     }
 
+    if (!currentUser) {
+      updateSlot(dayIndex, slotIndex, (currentSlot) => ({
+        ...currentSlot,
+        closed: true,
+        memberIds: confirmOccupied ? [] : currentSlot.memberIds,
+        names: confirmOccupied ? [] : currentSlot.names,
+      }));
+      setSlotClosurePrompt(null);
+      setMessage(`Closed ${bookingLabel(day)} at ${slot.time}.`);
+      return;
+    }
+
     const response = await fetch(publicAppPath("/api/slot-closures"), {
       body: JSON.stringify({
         confirmOccupied,
@@ -1696,6 +1883,17 @@ export default function Home() {
     const slot = day?.slots[slotIndex];
 
     if (!day || !slot) {
+      return;
+    }
+
+    if (!currentUser) {
+      updateSlot(dayIndex, slotIndex, (currentSlot) => ({
+        ...currentSlot,
+        closed: false,
+      }));
+      setMessage(
+        `Reopened ${bookingLabel(day)} at ${slot.time}. Members can book it again.`,
+      );
       return;
     }
 
@@ -1796,6 +1994,13 @@ export default function Home() {
     });
     setRegularSlotRequests((requests) =>
       requests.filter((request) => request.memberName !== memberName),
+    );
+    setSelectedRegularSlotRequestId((requestId) =>
+      regularSlotRequests.some(
+        (request) => request.id === requestId && request.memberName === memberName,
+      )
+        ? null
+        : requestId,
     );
     setWeeks((storedWeeks) =>
       Object.fromEntries(
@@ -1933,10 +2138,18 @@ export default function Home() {
       return;
     }
 
+    const savedRequestId = payload.id ?? `regular-request-${Date.now()}`;
+    const reviewLink =
+      typeof window === "undefined"
+        ? undefined
+        : `${window.location.origin}${publicAppPath(
+            `/?reviewRequest=${encodeURIComponent(savedRequestId)}&reviewMember=${encodeURIComponent(activeMember.id)}`,
+          )}`;
+
     setRegularSlotRequests((requests) => [
       ...requests,
       {
-        id: payload.id ?? `regular-request-${Date.now()}`,
+        id: savedRequestId,
         memberName: activeMemberFullName,
         abandonedDay: regularSlotChangeForm.abandonedDay,
         abandonedTime: regularSlotChangeForm.abandonedTime,
@@ -1955,6 +2168,7 @@ export default function Home() {
       requestedDay: regularSlotChangeForm.requestedDay,
       requestedTime: regularSlotChangeForm.requestedTime,
       effectiveWeek: effectiveWeekLabel(regularSlotChangeForm.effectiveWeek),
+      reviewLink,
       note: regularSlotChangeForm.note,
     });
     setRegularSlotRequestOpen(false);
@@ -2430,11 +2644,19 @@ export default function Home() {
       });
 
       if (payload.creditIssued) {
-        setBookingOpen(true);
+        const expiry = shortDate(addDays(day.isoDate, bookingRules.creditExpiryDays));
+
+        setBookingOpen(false);
+        setCreditDecisionPrompt({
+          bookingDate: bookingLabel(day),
+          expiry,
+          time: slot.time,
+        });
         setMessage(
-          `Cancelled ${bookingLabel(day)} at ${slot.time}. Credit issued. Pick a new slot now or decide later.`,
+          `Cancelled ${bookingLabel(day)} at ${slot.time}. Credit issued. It expires ${expiry}.`,
         );
       } else {
+        setCreditDecisionPrompt(null);
         setMessage(
           `Cancelled ${payload.bookingKind ?? "Makeup"} booking for ${bookingLabel(day)} at ${slot.time}.`,
         );
@@ -2463,7 +2685,14 @@ export default function Home() {
           expiry: shortDate(addDays(day.isoDate, bookingRules.creditExpiryDays)),
         },
       ]);
-      setBookingOpen(true);
+      const expiry = shortDate(addDays(day.isoDate, bookingRules.creditExpiryDays));
+
+      setBookingOpen(false);
+      setCreditDecisionPrompt({
+        bookingDate: bookingLabel(day),
+        expiry,
+        time: slot.time,
+      });
       queueCorrespondence({
         kind: "booking-cancelled",
         memberName: activeMemberFullName,
@@ -2472,9 +2701,10 @@ export default function Home() {
         bookingKind: matchingBooking?.kind ?? "Regular",
       });
       setMessage(
-        `Cancelled ${bookingLabel(day)} at ${slot.time}. Credit issued. Pick a new slot now or decide later.`,
+        `Cancelled ${bookingLabel(day)} at ${slot.time}. Credit issued. It expires ${expiry}.`,
       );
     } else {
+      setCreditDecisionPrompt(null);
       queueCorrespondence({
         kind: "booking-cancelled",
         memberName: activeMemberFullName,
@@ -2588,6 +2818,33 @@ export default function Home() {
     if (currentUser) {
       void loadScheduleData(activeMember.id, 0);
     }
+  }
+
+  function openRegularSlotRequestReview(request: RegularSlotChangeRequest) {
+    const requestMember = members.find(
+      (demoMember) => fullName(demoMember) === request.memberName,
+    );
+
+    setSelectedRegularSlotRequestId(request.id);
+    setSelectedSlot(null);
+    setBookingOpen(false);
+    setRegularSlotRequestOpen(false);
+    setCoachRegularSlotOpen(false);
+
+    if (requestMember) {
+      setCoachMode("member");
+      setSelectedMemberId(requestMember.id);
+      setCoachRegularSlotForm((current) => ({
+        ...current,
+        memberName: fullName(requestMember),
+      }));
+
+      if (currentUser) {
+        void loadScheduleData(requestMember.id, weekOffset);
+      }
+    }
+
+    setMessage(`Reviewing ${request.memberName}'s regular slot request.`);
   }
 
   if (pendingRegistration) {
@@ -3181,6 +3438,7 @@ export default function Home() {
                 onClick={() => {
                   setCoachMode("mission");
                   setSelectedSlot(null);
+                  setSelectedRegularSlotRequestId(null);
                   setMessage("Mission control ready.");
                 }}
               >
@@ -3314,6 +3572,52 @@ export default function Home() {
                   </div>
                 )}
 
+                {pendingRegularSlotRequests.length > 0 && (
+                  <div className="mb-3 border-b border-[var(--line)] pb-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-semibold">Regular slot requests</h3>
+                      <span className="text-xs text-[var(--orange)]">
+                        {pendingRegularSlotRequests.length} pending
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {pendingRegularSlotRequests.map((request) => {
+                        const isSelected =
+                          selectedRegularSlotRequestId === request.id;
+
+                        return (
+                          <button
+                            className={`w-full rounded-lg border p-3 text-left ${
+                              isSelected
+                                ? "border-[var(--mint)] bg-[rgba(0,255,184,0.12)]"
+                                : "border-[var(--line)] bg-black/20 hover:border-[var(--orange)]"
+                            }`}
+                            key={request.id}
+                            type="button"
+                            onClick={() => openRegularSlotRequestReview(request)}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="font-medium">
+                                  {request.memberName}
+                                </div>
+                                <div className="mt-1 text-xs text-[var(--muted)]">
+                                  {request.abandonedDay && request.abandonedTime
+                                    ? `${request.abandonedDay} ${request.abandonedTime} to ${request.requestedDay} ${request.requestedTime}`
+                                    : `To ${request.requestedDay} ${request.requestedTime}`}
+                                </div>
+                              </div>
+                              <span className="shrink-0 rounded-md border border-[var(--line)] px-2 py-1 text-xs text-[var(--muted)]">
+                                {effectiveWeekLabel(request.effectiveWeek)}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid max-h-96 gap-2 overflow-y-auto pr-1">
                   {members.map((demoMember) => {
                     const isSelected =
@@ -3338,6 +3642,7 @@ export default function Home() {
                           setCoachMode("member");
                           setSelectedMemberId(demoMember.id);
                           setSelectedSlot(null);
+                          setSelectedRegularSlotRequestId(null);
                           setCoachRegularSlotForm((current) => ({
                             ...current,
                             memberName: fullName(demoMember),
@@ -3725,6 +4030,105 @@ export default function Home() {
             </div>
           )}
 
+          {isCoach &&
+            selectedRegularSlotRequest &&
+            selectedRegularSlotReview && (
+              <div className="border-b border-[var(--line)] bg-[rgba(0,255,184,0.06)] p-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="text-sm text-[var(--muted)]">
+                      Regular slot request
+                    </div>
+                    <h3 className="mt-1 text-xl font-semibold">
+                      {selectedRegularSlotRequest.memberName}
+                    </h3>
+                    <p className="mt-2 text-sm text-[var(--muted)]">
+                      {selectedRegularSlotRequest.abandonedDay &&
+                      selectedRegularSlotRequest.abandonedTime
+                        ? `From ${selectedRegularSlotRequest.abandonedDay} ${selectedRegularSlotRequest.abandonedTime} to ${selectedRegularSlotRequest.requestedDay} ${selectedRegularSlotRequest.requestedTime}`
+                        : `To ${selectedRegularSlotRequest.requestedDay} ${selectedRegularSlotRequest.requestedTime}`}
+                      <span className="block">
+                        Effective{" "}
+                        {effectiveWeekLabel(
+                          selectedRegularSlotRequest.effectiveWeek,
+                        )}
+                      </span>
+                    </p>
+                    {selectedRegularSlotRequest.note && (
+                      <p className="mt-3 max-w-2xl border-l-2 border-[var(--line)] pl-3 text-sm text-[var(--muted)]">
+                        {selectedRegularSlotRequest.note}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:w-[28rem]">
+                    <div className="border-l-2 border-[var(--mint)] pl-3">
+                      <div className="text-xs uppercase text-[var(--muted)]">
+                        Requested slot
+                      </div>
+                      <div className="mt-1 font-semibold">
+                        {selectedRegularSlotRequest.requestedDay}{" "}
+                        {selectedRegularSlotRequest.requestedTime}
+                      </div>
+                      <div className="mt-1 text-sm text-[var(--muted)]">
+                        {`${selectedRegularSlotReview.requestedAssigned}/${regularSlotCapacity} already assigned`}
+                      </div>
+                      <div className="text-sm text-[var(--mint)]">
+                        {selectedRegularSlotReview.requestedRemainingAfter} open
+                        after approval
+                      </div>
+                    </div>
+
+                    <div className="border-l-2 border-[var(--orange)] pl-3">
+                      <div className="text-xs uppercase text-[var(--muted)]">
+                        Abandoned slot
+                      </div>
+                      <div className="mt-1 font-semibold">
+                        {selectedRegularSlotRequest.abandonedDay &&
+                        selectedRegularSlotRequest.abandonedTime
+                          ? `${selectedRegularSlotRequest.abandonedDay} ${selectedRegularSlotRequest.abandonedTime}`
+                          : "Not recorded"}
+                      </div>
+                      <div className="mt-1 text-sm text-[var(--muted)]">
+                        {`${selectedRegularSlotReview.abandonedAssigned}/${regularSlotCapacity} currently assigned`}
+                      </div>
+                      <div className="text-sm text-[var(--orange)]">
+                        {selectedRegularSlotReview.abandonedAfter} left after
+                        approval
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedRegularSlotRequest.status === "pending" ? (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      className="rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                      type="button"
+                      onClick={() =>
+                        approveRegularSlotRequest(selectedRegularSlotRequest)
+                      }
+                    >
+                      Approve request
+                    </button>
+                    <button
+                      className="rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--pink)] hover:text-white"
+                      type="button"
+                      onClick={() =>
+                        declineRegularSlotRequest(selectedRegularSlotRequest)
+                      }
+                    >
+                      Decline request
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-4 inline-flex rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)]">
+                    {selectedRegularSlotRequest.status}
+                  </div>
+                )}
+              </div>
+            )}
+
           {selectedDetails && (
             <div className="border-b border-[var(--line)] bg-black/20 p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -3782,13 +4186,14 @@ export default function Home() {
                   {!isMissionControl &&
                     slotState(selectedDetails.slot, activeMember) === "mine" && (
                     <button
-                      className="rounded-md border border-[rgba(255,78,184,0.55)] px-3 py-2 text-sm text-[var(--pink)] hover:bg-[rgba(255,78,184,0.1)]"
+                      className="flex items-center gap-2 rounded-md bg-[var(--pink)] px-3 py-2 text-sm font-semibold text-white shadow-[0_0_0_1px_rgba(255,255,255,0.08)] hover:bg-white hover:text-[#01161c]"
                       type="button"
                       onClick={() =>
                         cancelSlot(selectedDetails.dayIndex, selectedDetails.slotIndex)
                       }
                     >
-                      Cancel
+                      <X aria-hidden="true" className="size-4" />
+                      Cancel booking
                     </button>
                   )}
                   {!isMissionControl &&
@@ -4944,6 +5349,72 @@ export default function Home() {
             >
               Save changes
             </button>
+          </div>
+        </div>
+      )}
+
+      {creditDecisionPrompt && (
+        <div className="fixed inset-0 z-40 flex items-end bg-black/70 p-4 sm:items-center sm:justify-center">
+          <div className="w-full max-w-lg rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm text-[var(--muted)]">Credit issued</p>
+                <h2 className="mt-1 text-lg font-semibold">
+                  Book a new session now?
+                </h2>
+              </div>
+              <button
+                className="flex size-10 items-center justify-center rounded-md text-[var(--muted)] hover:bg-white/10 hover:text-white"
+                type="button"
+                aria-label="Close credit choice"
+                title="Close"
+                onClick={() => {
+                  setCreditDecisionPrompt(null);
+                  setMessage(
+                    `Credit held. It expires ${creditDecisionPrompt.expiry}.`,
+                  );
+                }}
+              >
+                <X aria-hidden="true" className="size-5" />
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-[var(--orange)] bg-[rgba(255,138,31,0.1)] p-3">
+              <div className="font-medium">
+                {creditDecisionPrompt.bookingDate} at {creditDecisionPrompt.time}
+              </div>
+              <div className="mt-1 text-sm text-[var(--muted)]">
+                Your credit expires {creditDecisionPrompt.expiry}.
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-2 sm:grid-cols-2">
+              <button
+                className="rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
+                type="button"
+                onClick={() => {
+                  setCreditDecisionPrompt(null);
+                  setBookingOpen(true);
+                  setMessage(
+                    `Use your credit before ${creditDecisionPrompt.expiry}.`,
+                  );
+                }}
+              >
+                Book now
+              </button>
+              <button
+                className="rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
+                type="button"
+                onClick={() => {
+                  setCreditDecisionPrompt(null);
+                  setMessage(
+                    `Credit held. It expires ${creditDecisionPrompt.expiry}.`,
+                  );
+                }}
+              >
+                Hold credit
+              </button>
+            </div>
           </div>
         </div>
       )}
