@@ -17,7 +17,7 @@ type MemberRow = {
   weekly_quota: number;
 };
 
-const adminCoachEmail = "manu@intentionalsets.com";
+const superAdminEmail = "manu@intentionalsets.com";
 
 function isMemberStatus(value: unknown): value is MemberStatus {
   return value === "pending" || value === "active" || value === "archived";
@@ -87,9 +87,9 @@ export async function PATCH(request: Request, { params }: MemberParams) {
       );
     }
 
-    if (user.email.toLowerCase() !== adminCoachEmail) {
+    if (user.email.toLowerCase() !== superAdminEmail) {
       return NextResponse.json(
-        { error: "Only Manu can remove coach accounts." },
+        { error: "Only the super admin can remove coach accounts." },
         { status: 403 },
       );
     }

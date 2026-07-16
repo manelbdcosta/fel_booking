@@ -265,7 +265,7 @@ const previewAccessEnabled =
   process.env.NODE_ENV === "test";
 
 const correspondenceEmail = "manu@intentionalsets.com";
-const adminCoachEmail = "manu@intentionalsets.com";
+const superAdminEmail = "manu@intentionalsets.com";
 
 function queueCorrespondence(event: Record<string, string | undefined>) {
   if (typeof window === "undefined") {
@@ -737,9 +737,9 @@ export default function Home() {
   const [message, setMessage] = useState("Ready for bookings");
   const isCoach = currentRole === "coach";
   const isMissionControl = isCoach && coachMode === "mission";
-  const isAdminCoach =
+  const isSuperAdmin =
     currentUser?.role === "coach" &&
-    currentUser.email.toLowerCase() === adminCoachEmail;
+    currentUser.email.toLowerCase() === superAdminEmail;
   const coachNames = coaches.join(", ");
   const pendingInvitesByMemberId = new Map(
     pendingInvites.map((invite) => [invite.memberId, invite]),
@@ -3448,64 +3448,75 @@ export default function Home() {
                 </div>
               </button>
 
-              {isAdminCoach && (
-                <div className="mt-3 border-t border-[var(--line)] pt-3">
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <h3 className="text-sm font-semibold">Coach team</h3>
-                    <span className="text-xs text-[var(--muted)]">
-                      {coachAccounts.length} total
-                    </span>
-                  </div>
-                  <div className="space-y-2">
-                    {coachAccounts.map((coachAccount) => {
-                      const pendingInvite = pendingInvitesByMemberId.get(
-                        coachAccount.id,
-                      );
-                      const canRemoveCoach = coachAccount.id !== currentUser?.id;
+              <div className="mt-3 border-t border-[var(--line)] pt-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold">Coach team</h3>
+                  <span className="text-xs text-[var(--muted)]">
+                    {coachAccounts.length} total
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {coachAccounts.map((coachAccount) => {
+                    const pendingInvite = pendingInvitesByMemberId.get(
+                      coachAccount.id,
+                    );
+                    const isCurrentCoach = coachAccount.id === currentUser?.id;
+                    const isSuperAdminCoach =
+                      coachAccount.email.toLowerCase() === superAdminEmail;
+                    const canRemoveCoach = isSuperAdmin && !isCurrentCoach;
 
-                      return (
-                        <div
-                          className="rounded-lg border border-[var(--line)] bg-black/20 p-3"
-                          key={coachAccount.id}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="font-medium">
-                                {fullName(coachAccount)}
-                              </div>
-                              <div className="break-all text-xs text-[var(--muted)]">
-                                {coachAccount.email}
-                              </div>
-                              <div className="mt-1 text-xs text-[var(--orange)]">
+                    return (
+                      <div
+                        className="rounded-lg border border-[var(--line)] bg-black/20 p-3"
+                        key={coachAccount.id}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-medium">
+                              {fullName(coachAccount)}
+                            </div>
+                            <div className="break-all text-xs text-[var(--muted)]">
+                              {coachAccount.email}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
+                              <span className="text-[var(--orange)]">
                                 {pendingInvite
                                   ? "Invited, not joined"
                                   : coachAccount.status === "pending"
                                     ? "Pending"
                                     : "Active"}
-                              </div>
+                              </span>
+                              {isCurrentCoach && (
+                                <span className="text-[var(--mint)]">You</span>
+                              )}
+                              {isSuperAdminCoach && (
+                                <span className="text-[var(--mint)]">
+                                  Super admin
+                                </span>
+                              )}
                             </div>
-                            {canRemoveCoach && (
-                              <button
-                                aria-label={`Remove ${fullName(coachAccount)}`}
-                                className="shrink-0 rounded-md border border-[rgba(255,78,184,0.55)] px-3 py-2 text-sm text-[var(--pink)] hover:bg-[rgba(255,78,184,0.1)]"
-                                type="button"
-                                onClick={() =>
-                                  setRemoveCoachPrompt({
-                                    coach: coachAccount,
-                                    pendingInvite: Boolean(pendingInvite),
-                                  })
-                                }
-                              >
-                                Remove
-                              </button>
-                            )}
                           </div>
+                          {canRemoveCoach && (
+                            <button
+                              aria-label={`Remove ${fullName(coachAccount)}`}
+                              className="shrink-0 rounded-md border border-[rgba(255,78,184,0.55)] px-3 py-2 text-sm text-[var(--pink)] hover:bg-[rgba(255,78,184,0.1)]"
+                              type="button"
+                              onClick={() =>
+                                setRemoveCoachPrompt({
+                                  coach: coachAccount,
+                                  pendingInvite: Boolean(pendingInvite),
+                                })
+                              }
+                            >
+                              Remove
+                            </button>
+                          )}
                         </div>
-                      );
-                    })}
-                  </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              )}
+              </div>
             </section>
           )}
 

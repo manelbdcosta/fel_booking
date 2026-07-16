@@ -217,6 +217,77 @@ describe("demo coach journey", () => {
     );
   });
 
+  it("shows the coach team to non-super-admin coaches without removal controls", async () => {
+    const user = renderHome();
+    const fetchMock = vi.fn((input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+
+      if (url.includes("/api/auth/me")) {
+        return jsonResponse({ user: null }, 401);
+      }
+
+      if (url.includes("/api/auth/login")) {
+        return jsonResponse({
+          user: {
+            email: "ben@example.com",
+            firstName: "Ben",
+            id: "coach-ben",
+            lastName: "",
+            role: "coach",
+          },
+        });
+      }
+
+      if (url.includes("/api/bootstrap")) {
+        return jsonResponse({
+          coachAccounts: [
+            {
+              email: "ben@example.com",
+              firstName: "Ben",
+              id: "coach-ben",
+              lastName: "",
+              status: "active",
+            },
+            {
+              email: "manu@intentionalsets.com",
+              firstName: "Manu",
+              id: "coach-manu",
+              lastName: "",
+              status: "active",
+            },
+          ],
+          coaches: ["Ben", "Manu"],
+          members: [],
+          pendingInvites: [],
+          regularSlotRequests: [],
+          regularSlotsByMember: {},
+          weeklyQuotasByMember: {},
+        });
+      }
+
+      return jsonResponse({ ok: true });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Home />);
+
+    await user.type(screen.getByLabelText("Email"), "ben@example.com");
+    await user.type(screen.getByLabelText("Password"), "password123");
+    const loginButtons = screen.getAllByRole("button", { name: "Log in" });
+    await user.click(loginButtons[loginButtons.length - 1]);
+
+    const coachTeam = (await screen.findByText("Coach team")).closest("div")
+      ?.parentElement;
+
+    expect(coachTeam).toBeTruthy();
+    expect(within(coachTeam as HTMLElement).getByText("Ben")).toBeTruthy();
+    expect(within(coachTeam as HTMLElement).getByText("You")).toBeTruthy();
+    expect(within(coachTeam as HTMLElement).getByText("Manu")).toBeTruthy();
+    expect(within(coachTeam as HTMLElement).getByText("Super admin")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove Ben" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove Manu" })).toBeNull();
+  });
+
   it("lets a coach remove a selected member with confirmation", async () => {
     const user = renderHome();
     render(<Home />);
