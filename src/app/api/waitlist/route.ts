@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 
+import {
+  createCoachNotification,
+  readMemberNotificationTarget,
+} from "@/lib/coach-notifications";
 import { cleanText, requireDatabase } from "@/lib/database";
-import { joinWaitlist, leaveWaitlist } from "@/lib/schedule-data";
+import {
+  parseCorrespondenceEvent,
+  sendCorrespondenceEmail,
+} from "@/lib/outbound-email";
+import { dateLabel, joinWaitlist, leaveWaitlist } from "@/lib/schedule-data";
 import { getSessionUser, unauthorizedResponse } from "@/lib/server-auth";
 
 async function parseAction(request: Request) {
@@ -46,6 +54,46 @@ export async function POST(request: Request) {
     );
   }
 
+  const notificationMemberId = user.role === "member" ? user.id : action.memberId;
+  const member = notificationMemberId
+    ? await readMemberNotificationTarget(db, notificationMemberId)
+    : null;
+
+  if (member) {
+    const memberEvent = parseCorrespondenceEvent({
+      bookingDate: dateLabel(action.sessionDate),
+      kind: "waitlist-joined",
+      memberName: member.name,
+      time: action.startTime,
+    });
+
+    try {
+      await createCoachNotification(db, {
+        body: "Waitlist entry added.",
+        kind: "waitlist-joined",
+        memberId: member.id,
+        memberName: member.name,
+        sessionDate: action.sessionDate,
+        startTime: action.startTime,
+        title: `${member.name} joined the waitlist for ${dateLabel(
+          action.sessionDate,
+        )} at ${action.startTime}`,
+      });
+    } catch (error) {
+      console.error("Unable to create waitlist notification", error);
+    }
+
+    if (memberEvent) {
+      const emailResult = await sendCorrespondenceEmail(memberEvent, {
+        to: [member.email],
+      });
+
+      if (!emailResult.ok) {
+        console.error("Unable to send waitlist email", emailResult.error);
+      }
+    }
+  }
+
   return NextResponse.json(result);
 }
 
@@ -70,6 +118,46 @@ export async function DELETE(request: Request) {
       { error: result.error },
       { status: result.status },
     );
+  }
+
+  const notificationMemberId = user.role === "member" ? user.id : action.memberId;
+  const member = notificationMemberId
+    ? await readMemberNotificationTarget(db, notificationMemberId)
+    : null;
+
+  if (member) {
+    const memberEvent = parseCorrespondenceEvent({
+      bookingDate: dateLabel(action.sessionDate),
+      kind: "waitlist-left",
+      memberName: member.name,
+      time: action.startTime,
+    });
+
+    try {
+      await createCoachNotification(db, {
+        body: "Waitlist entry removed.",
+        kind: "waitlist-left",
+        memberId: member.id,
+        memberName: member.name,
+        sessionDate: action.sessionDate,
+        startTime: action.startTime,
+        title: `${member.name} left the waitlist for ${dateLabel(
+          action.sessionDate,
+        )} at ${action.startTime}`,
+      });
+    } catch (error) {
+      console.error("Unable to create waitlist removal notification", error);
+    }
+
+    if (memberEvent) {
+      const emailResult = await sendCorrespondenceEmail(memberEvent, {
+        to: [member.email],
+      });
+
+      if (!emailResult.ok) {
+        console.error("Unable to send waitlist removal email", emailResult.error);
+      }
+    }
   }
 
   return NextResponse.json(result);

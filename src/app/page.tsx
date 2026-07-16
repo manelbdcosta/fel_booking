@@ -201,6 +201,28 @@ type AuthUser = {
   role: DemoRole;
 };
 
+type CoachNotificationKind =
+  | "booking-created"
+  | "booking-cancelled"
+  | "waitlist-joined"
+  | "waitlist-left"
+  | "slot-closed"
+  | "regular-slot-change-requested";
+
+type CoachNotification = {
+  id: string;
+  kind: CoachNotificationKind;
+  memberId: string | null;
+  memberName: string;
+  sessionDate: string | null;
+  startTime: string | null;
+  regularSlotRequestId: string | null;
+  title: string;
+  body: string;
+  readAt: string | null;
+  createdAt: string;
+};
+
 type BootstrapData = {
   coachAccounts?: CoachAccount[];
   coaches?: string[];
@@ -410,6 +432,22 @@ function weekStartFromIso(isoDate: string) {
 
 function weekStartForOffset(offset: number) {
   return addDays(weekStartFromIso(todayIsoDate()), offset * 7);
+}
+
+function isoDateToUtcMs(isoDate: string) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+
+  return Date.UTC(year, month - 1, day, 12);
+}
+
+function weekOffsetForIso(isoDate: string) {
+  const currentWeekStart = weekStartForOffset(0);
+  const targetWeekStart = weekStartFromIso(isoDate);
+  const diffDays =
+    (isoDateToUtcMs(targetWeekStart) - isoDateToUtcMs(currentWeekStart)) /
+    86_400_000;
+
+  return Math.min(3, Math.max(0, Math.round(diffDays / 7)));
 }
 
 function weekRangeLabel(offset: number) {
@@ -732,7 +770,7 @@ export default function Home() {
     useState<string | null>(null);
   const [bookingOpen, setBookingOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notificationsRead, setNotificationsRead] = useState(false);
+  const [notifications, setNotifications] = useState<CoachNotification[]>([]);
   const [appStateLoaded, setAppStateLoaded] = useState(false);
   const [message, setMessage] = useState("Ready for bookings");
   const isCoach = currentRole === "coach";
@@ -753,6 +791,9 @@ export default function Home() {
   const pendingRegularSlotRequests = regularSlotRequests.filter(
     (request) => request.status === "pending",
   );
+  const unreadNotificationCount = notifications.filter(
+    (notification) => !notification.readAt,
+  ).length;
   const selectedRegularSlotRequest =
     regularSlotRequests.find(
       (request) => request.id === selectedRegularSlotRequestId,
@@ -1046,6 +1087,38 @@ export default function Home() {
     [applyScheduleData],
   );
 
+  const loadCoachNotifications = useCallback(async () => {
+    const response = await fetch(publicAppPath("/api/notifications"), {
+      headers: { Accept: "application/json" },
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      notifications?: CoachNotification[];
+    };
+
+    if (response.ok && Array.isArray(payload.notifications)) {
+      setNotifications(payload.notifications);
+    }
+  }, []);
+
+  const addCoachNotification = useCallback(
+    (notification: Omit<CoachNotification, "id" | "createdAt" | "readAt">) => {
+      if (currentRole !== "coach") {
+        return;
+      }
+
+      setNotifications((currentNotifications) => [
+        {
+          ...notification,
+          createdAt: new Date().toISOString(),
+          id: `local-notification-${Date.now()}`,
+          readAt: null,
+        },
+        ...currentNotifications,
+      ]);
+    },
+    [currentRole],
+  );
+
   const finishAuthenticatedSession = useCallback(
     async (user: AuthUser, messagePrefix = "Signed in as") => {
       setCurrentUser(user);
@@ -1053,6 +1126,10 @@ export default function Home() {
 
       if (user.role === "member") {
         setSelectedMemberId(user.id);
+        setNotifications([]);
+        setNotificationsOpen(false);
+      } else {
+        void loadCoachNotifications();
       }
 
       const bootstrapResponse = await fetch(publicAppPath("/api/bootstrap"), {
@@ -1116,7 +1193,7 @@ export default function Home() {
           : `${messagePrefix} ${user.firstName}.`,
       );
     },
-    [applyBootstrapData, loadScheduleData],
+    [applyBootstrapData, loadCoachNotifications, loadScheduleData],
   );
 
   useEffect(() => {
@@ -1154,6 +1231,10 @@ export default function Home() {
 
             if (payload.user.role === "member") {
               setSelectedMemberId(payload.user.id);
+              setNotifications([]);
+              setNotificationsOpen(false);
+            } else {
+              void loadCoachNotifications();
             }
           }
         }
@@ -1253,7 +1334,7 @@ export default function Home() {
         clearTimeout(appStateSaveTimer.current);
       }
     };
-  }, [applyBootstrapData, loadScheduleData]);
+  }, [applyBootstrapData, loadCoachNotifications, loadScheduleData]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1584,6 +1665,8 @@ export default function Home() {
     setWeekOffset(0);
     setCoachDayIndex(sessionDayIndexFromIso(todayIsoDate()));
     setSelectedSlot(null);
+    setNotifications([]);
+    setNotificationsOpen(false);
     setAuthMessage("");
     setPendingRegistration(null);
     setMessage(
@@ -1611,6 +1694,7 @@ export default function Home() {
     setCoachRegularSlotOpen(false);
     setInviteOpen(false);
     setNotificationsOpen(false);
+    setNotifications([]);
     setMessage("Ready for bookings");
   }
 
@@ -1878,6 +1962,7 @@ export default function Home() {
 
     setSlotClosurePrompt(null);
     await loadScheduleData(activeMember.id, weekOffset);
+    void loadCoachNotifications();
     setMessage(
       payload.notificationSent === false
         ? `Closed ${bookingLabel(day)} at ${slot.time}, but notification email failed: ${payload.emailError ?? "unknown error"}`
@@ -2167,6 +2252,16 @@ export default function Home() {
         status: "pending",
       },
     ]);
+    addCoachNotification({
+      body: `From ${regularSlotChangeForm.abandonedDay} ${regularSlotChangeForm.abandonedTime} to ${regularSlotChangeForm.requestedDay} ${regularSlotChangeForm.requestedTime}.`,
+      kind: "regular-slot-change-requested",
+      memberId: activeMember.id,
+      memberName: activeMemberFullName,
+      regularSlotRequestId: savedRequestId,
+      sessionDate: null,
+      startTime: null,
+      title: `${activeMemberFullName} requested a regular slot change`,
+    });
     queueCorrespondence({
       kind: "regular-slot-change-requested",
       memberName: activeMemberFullName,
@@ -2552,6 +2647,16 @@ export default function Home() {
         time: slot.time,
         bookingKind: kind,
       });
+      addCoachNotification({
+        body: `${kind} booking created by a coach.`,
+        kind: "booking-created",
+        memberId: activeMember.id,
+        memberName: activeMemberFullName,
+        regularSlotRequestId: null,
+        sessionDate: day.isoDate,
+        startTime: slot.time,
+        title: `${activeMemberFullName} booked ${bookingLabel(day)} at ${slot.time}`,
+      });
       setSelectedSlot({ weekOffset, dayIndex, slotIndex });
       setBookingOpen(false);
       setMessage(
@@ -2603,6 +2708,16 @@ export default function Home() {
       time: slot.time,
       bookingKind: options.coachOverride ? "Coach override" : kind,
     });
+    addCoachNotification({
+      body: `${options.coachOverride ? "Coach override" : kind} booking created.`,
+      kind: "booking-created",
+      memberId: activeMember.id,
+      memberName: activeMemberFullName,
+      regularSlotRequestId: null,
+      sessionDate: day.isoDate,
+      startTime: slot.time,
+      title: `${activeMemberFullName} booked ${bookingLabel(day)} at ${slot.time}`,
+    });
     setSelectedSlot({ weekOffset, dayIndex, slotIndex });
     setBookingOpen(false);
     setMessage(
@@ -2648,6 +2763,18 @@ export default function Home() {
         bookingDate: bookingLabel(day),
         time: slot.time,
         bookingKind: payload.bookingKind ?? matchingBooking?.kind ?? "Regular",
+      });
+      addCoachNotification({
+        body: `${payload.bookingKind ?? matchingBooking?.kind ?? "Booking"} cancelled${
+          payload.creditIssued ? ". Credit issued." : "."
+        }`,
+        kind: "booking-cancelled",
+        memberId: activeMember.id,
+        memberName: activeMemberFullName,
+        regularSlotRequestId: null,
+        sessionDate: day.isoDate,
+        startTime: slot.time,
+        title: `${activeMemberFullName} cancelled ${bookingLabel(day)} at ${slot.time}`,
       });
 
       if (payload.creditIssued) {
@@ -2707,6 +2834,16 @@ export default function Home() {
         time: slot.time,
         bookingKind: matchingBooking?.kind ?? "Regular",
       });
+      addCoachNotification({
+        body: `${matchingBooking?.kind ?? "Regular"} booking cancelled. Credit issued.`,
+        kind: "booking-cancelled",
+        memberId: activeMember.id,
+        memberName: activeMemberFullName,
+        regularSlotRequestId: null,
+        sessionDate: day.isoDate,
+        startTime: slot.time,
+        title: `${activeMemberFullName} cancelled ${bookingLabel(day)} at ${slot.time}`,
+      });
       setMessage(
         `Cancelled ${bookingLabel(day)} at ${slot.time}. Credit issued. It expires ${expiry}.`,
       );
@@ -2718,6 +2855,16 @@ export default function Home() {
         bookingDate: bookingLabel(day),
         time: slot.time,
         bookingKind: "Makeup",
+      });
+      addCoachNotification({
+        body: "Makeup booking cancelled.",
+        kind: "booking-cancelled",
+        memberId: activeMember.id,
+        memberName: activeMemberFullName,
+        regularSlotRequestId: null,
+        sessionDate: day.isoDate,
+        startTime: slot.time,
+        title: `${activeMemberFullName} cancelled ${bookingLabel(day)} at ${slot.time}`,
       });
       setMessage(`Cancelled makeup booking for ${bookingLabel(day)} at ${slot.time}.`);
     }
@@ -2757,6 +2904,18 @@ export default function Home() {
         bookingDate: bookingLabel(day),
         time: slot.time,
       });
+      addCoachNotification({
+        body: alreadyJoined ? "Waitlist entry removed." : "Waitlist entry added.",
+        kind: alreadyJoined ? "waitlist-left" : "waitlist-joined",
+        memberId: activeMember.id,
+        memberName: activeMemberFullName,
+        regularSlotRequestId: null,
+        sessionDate: day.isoDate,
+        startTime: slot.time,
+        title: alreadyJoined
+          ? `${activeMemberFullName} left the waitlist for ${bookingLabel(day)} at ${slot.time}`
+          : `${activeMemberFullName} joined the waitlist for ${bookingLabel(day)} at ${slot.time}`,
+      });
       setMessage(
         alreadyJoined
           ? `Left waitlist for ${bookingLabel(day)} at ${slot.time}.`
@@ -2776,6 +2935,16 @@ export default function Home() {
         memberName: activeMemberFullName,
         bookingDate: bookingLabel(day),
         time: slot.time,
+      });
+      addCoachNotification({
+        body: "Waitlist entry removed.",
+        kind: "waitlist-left",
+        memberId: activeMember.id,
+        memberName: activeMemberFullName,
+        regularSlotRequestId: null,
+        sessionDate: day.isoDate,
+        startTime: slot.time,
+        title: `${activeMemberFullName} left the waitlist for ${bookingLabel(day)} at ${slot.time}`,
       });
       setMessage(`Left waitlist for ${bookingLabel(day)} at ${slot.time}.`);
       return;
@@ -2800,6 +2969,16 @@ export default function Home() {
       memberName: activeMemberFullName,
       bookingDate: bookingLabel(day),
       time: slot.time,
+    });
+    addCoachNotification({
+      body: "Waitlist entry added.",
+      kind: "waitlist-joined",
+      memberId: activeMember.id,
+      memberName: activeMemberFullName,
+      regularSlotRequestId: null,
+      sessionDate: day.isoDate,
+      startTime: slot.time,
+      title: `${activeMemberFullName} joined the waitlist for ${bookingLabel(day)} at ${slot.time}`,
     });
     setMessage(
       `Joined waitlist for ${activeMemberFullName} on ${bookingLabel(day)} at ${slot.time}.`,
@@ -2852,6 +3031,90 @@ export default function Home() {
     }
 
     setMessage(`Reviewing ${request.memberName}'s regular slot request.`);
+  }
+
+  function openCoachNotification(notification: CoachNotification) {
+    const request = notification.regularSlotRequestId
+      ? regularSlotRequests.find(
+          (currentRequest) =>
+            currentRequest.id === notification.regularSlotRequestId,
+        )
+      : null;
+
+    setNotificationsOpen(false);
+
+    if (request) {
+      openRegularSlotRequestReview(request);
+      return;
+    }
+
+    if (!notification.memberId) {
+      setMessage(notification.title);
+      return;
+    }
+
+    const selectedMember = members.find(
+      (demoMember) => demoMember.id === notification.memberId,
+    );
+    const nextOffset = notification.sessionDate
+      ? weekOffsetForIso(notification.sessionDate)
+      : weekOffset;
+    const nextDayIndex = notification.sessionDate
+      ? sessionDayIndexFromIso(notification.sessionDate)
+      : coachDayIndex;
+    const nextSlotIndex = notification.startTime
+      ? bookingRules.slotTimes.indexOf(
+          notification.startTime as (typeof bookingRules.slotTimes)[number],
+        )
+      : -1;
+
+    setCoachMode("member");
+    setSelectedMemberId(notification.memberId);
+    setSelectedRegularSlotRequestId(null);
+    setBookingOpen(false);
+    setRegularSlotRequestOpen(false);
+    setCoachRegularSlotOpen(false);
+    setWeekOffset(nextOffset);
+    setCoachDayIndex(nextDayIndex);
+
+    if (nextSlotIndex >= 0) {
+      setSelectedSlot({
+        dayIndex: nextDayIndex,
+        slotIndex: nextSlotIndex,
+        weekOffset: nextOffset,
+      });
+    } else {
+      setSelectedSlot(null);
+    }
+
+    if (currentUser) {
+      void loadScheduleData(notification.memberId, nextOffset);
+    }
+
+    setMessage(
+      notification.sessionDate && notification.startTime
+        ? `Showing ${selectedMember ? fullName(selectedMember) : notification.memberName}'s ${dateLabel(notification.sessionDate)} ${notification.startTime} booking change.`
+        : `Showing ${selectedMember ? fullName(selectedMember) : notification.memberName}.`,
+    );
+  }
+
+  async function markNotificationsRead() {
+    if (currentUser) {
+      await fetch(publicAppPath("/api/notifications"), {
+        method: "POST",
+      }).catch(() => undefined);
+    }
+
+    const readAt = new Date().toISOString();
+
+    setNotifications((currentNotifications) =>
+      currentNotifications.map((notification) => ({
+        ...notification,
+        readAt: notification.readAt ?? readAt,
+      })),
+    );
+    setNotificationsOpen(false);
+    setMessage("Notifications marked read.");
   }
 
   if (pendingRegistration) {
@@ -3355,19 +3618,21 @@ export default function Home() {
                   ? "Preview coach"
                   : "Preview member"}
             </div>
-            <button
-              className="relative flex size-10 items-center justify-center rounded-md border border-[var(--line)] text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
-              type="button"
-              aria-label="Notifications"
-              aria-expanded={notificationsOpen}
-              title="Notifications"
-              onClick={() => setNotificationsOpen((open) => !open)}
-            >
-              <Bell aria-hidden="true" className="size-5" />
-              {!notificationsRead && (
-                <span className="absolute right-2 top-2 size-2 rounded-full bg-[var(--pink)]" />
-              )}
-            </button>
+            {isCoach && (
+              <button
+                className="relative flex size-10 items-center justify-center rounded-md border border-[var(--line)] text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
+                type="button"
+                aria-label="Notifications"
+                aria-expanded={notificationsOpen}
+                title="Notifications"
+                onClick={() => setNotificationsOpen((open) => !open)}
+              >
+                <Bell aria-hidden="true" className="size-5" />
+                {unreadNotificationCount > 0 && (
+                  <span className="absolute right-2 top-2 size-2 rounded-full bg-[var(--pink)]" />
+                )}
+              </button>
+            )}
             {!isMissionControl && (
               <button
                 className="flex items-center gap-2 rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] hover:bg-white"
@@ -3390,10 +3655,17 @@ export default function Home() {
           </div>
         </div>
 
-        {notificationsOpen && (
+        {isCoach && notificationsOpen && (
           <div className="absolute right-4 top-[68px] z-20 w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3 shadow-2xl sm:right-6">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold">Notifications</h2>
+              <div>
+                <h2 className="text-sm font-semibold">Notifications</h2>
+                <p className="mt-0.5 text-xs text-[var(--muted)]">
+                  {unreadNotificationCount > 0
+                    ? `${unreadNotificationCount} unread`
+                    : "All caught up"}
+                </p>
+              </div>
               <button
                 className="flex size-8 items-center justify-center rounded-md text-[var(--muted)] hover:bg-white/10 hover:text-white"
                 type="button"
@@ -3405,23 +3677,44 @@ export default function Home() {
               </button>
             </div>
             <div className="space-y-2 text-sm">
-              <div className="rounded-lg border border-[var(--line)] bg-black/20 p-3">
-                Credit from Thu 16 Jul expires on 13 Aug.
-              </div>
-              <div className="rounded-lg border border-[var(--line)] bg-black/20 p-3">
-                Fri 08:30 has 2 spots available.
-              </div>
+              {notifications.length > 0 ? (
+                notifications.map((notification) => (
+                  <button
+                    className={`w-full rounded-lg border p-3 text-left transition-colors hover:border-[var(--mint)] ${
+                      notification.readAt
+                        ? "border-[var(--line)] bg-black/20"
+                        : "border-[rgba(255,78,184,0.65)] bg-[rgba(255,78,184,0.08)]"
+                    }`}
+                    key={notification.id}
+                    type="button"
+                    onClick={() => openCoachNotification(notification)}
+                  >
+                    <span className="block font-medium text-white">
+                      {notification.title}
+                    </span>
+                    <span className="mt-1 block text-xs text-[var(--muted)]">
+                      {notification.body}
+                    </span>
+                    {notification.sessionDate && notification.startTime && (
+                      <span className="mt-2 block text-xs text-[var(--orange)]">
+                        {dateLabel(notification.sessionDate)} · {notification.startTime}
+                      </span>
+                    )}
+                  </button>
+                ))
+              ) : (
+                <div className="rounded-lg border border-[var(--line)] bg-black/20 p-3 text-[var(--muted)]">
+                  No coach notifications yet.
+                </div>
+              )}
             </div>
             <button
               className="mt-3 w-full rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
               type="button"
-              onClick={() => {
-                setNotificationsRead(true);
-                setNotificationsOpen(false);
-                setMessage("Notifications marked read.");
-              }}
+              disabled={notifications.length === 0 || unreadNotificationCount === 0}
+              onClick={markNotificationsRead}
             >
-              Mark read
+              Mark all read
             </button>
           </div>
         )}

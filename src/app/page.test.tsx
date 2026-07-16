@@ -80,6 +80,7 @@ describe("demo member journey", () => {
 
     expect(screen.getByText("Member schedule")).toBeTruthy();
     expect(screen.getByText("Coach approval required")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Notifications" })).toBeNull();
     expect(screen.queryByText("Emma, Gemma, Reserved, Drop-in")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Request change" }));
@@ -540,5 +541,19 @@ describe("demo coach journey", () => {
     expect(
       screen.getByText(/Coach override booked Maddie Cannon for Mon 6 Jul at 07:00/),
     ).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /Emma Richierich/ }));
+    expect(screen.getByText(/Managing Emma Richierich/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Notifications" }));
+    await user.click(
+      screen.getByRole("button", {
+        name: /Maddie Cannon booked Mon 6 Jul at 07:00/,
+      }),
+    );
+
+    expect(
+      screen.getByText(/Showing Maddie Cannon's Mon 6 Jul 07:00 booking change/),
+    ).toBeTruthy();
+    expect(screen.getByText("Mon 6 Jul at 07:00")).toBeTruthy();
   });
 });

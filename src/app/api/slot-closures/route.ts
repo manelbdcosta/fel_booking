@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { bookingRules } from "@/lib/booking-config";
+import { createCoachNotification } from "@/lib/coach-notifications";
 import { cleanText, createId, requireDatabase } from "@/lib/database";
 import {
   parseCorrespondenceEvent,
@@ -170,6 +171,32 @@ export async function POST(request: Request) {
     for (const statement of statements) {
       await statement.run();
     }
+  }
+
+  const coachNotificationResults = await Promise.allSettled(
+    bookedMembers.map((member) =>
+      createCoachNotification(db, {
+        body: "Booking cancelled because the slot was closed. Credit issued.",
+        kind: "slot-closed",
+        memberId: member.member_id,
+        memberName: `${member.first_name} ${member.last_name}`,
+        sessionDate,
+        startTime,
+        title: `${member.first_name} ${member.last_name} was displaced from ${dateLabel(
+          sessionDate,
+        )} at ${startTime}`,
+      }),
+    ),
+  );
+  const failedCoachNotification = coachNotificationResults.find(
+    (result) => result.status === "rejected",
+  );
+
+  if (failedCoachNotification) {
+    console.error(
+      "Unable to create slot closure notification",
+      failedCoachNotification.reason,
+    );
   }
 
   const notificationResults = await Promise.all(

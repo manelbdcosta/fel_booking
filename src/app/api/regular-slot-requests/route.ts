@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 
+import {
+  createCoachNotification,
+  readMemberNotificationTarget,
+} from "@/lib/coach-notifications";
 import { cleanText, createId, requireDatabase } from "@/lib/database";
 import { getSessionUser, unauthorizedResponse } from "@/lib/server-auth";
 
@@ -12,6 +16,9 @@ const weekdayNumbers: Record<string, number> = {
 };
 
 const allowedTimes = new Set(["06:30", "07:00", "07:30", "08:00", "08:30"]);
+const weekdaysByNumber = Object.fromEntries(
+  Object.entries(weekdayNumbers).map(([day, number]) => [number, day]),
+) as Record<number, string>;
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -145,6 +152,23 @@ export async function POST(request: Request) {
       note || null,
     )
     .run();
+
+  const member = await readMemberNotificationTarget(db, memberId);
+
+  if (member) {
+    try {
+      await createCoachNotification(db, {
+        body: `From ${weekdaysByNumber[abandonedWeekday]} ${abandonedTime} to ${weekdaysByNumber[requestedWeekday]} ${requestedTime}.`,
+        kind: "regular-slot-change-requested",
+        memberId: member.id,
+        memberName: member.name,
+        regularSlotRequestId: requestId,
+        title: `${member.name} requested a regular slot change`,
+      });
+    } catch (error) {
+      console.error("Unable to create regular slot request notification", error);
+    }
+  }
 
   return NextResponse.json({ id: requestId }, { status: 201 });
 }

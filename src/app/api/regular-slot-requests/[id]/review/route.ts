@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { bookingRules } from "@/lib/booking-config";
 import { cleanText, requireDatabase } from "@/lib/database";
 import {
+  parseCorrespondenceEvent,
+  sendCorrespondenceEmail,
+} from "@/lib/outbound-email";
+import {
   forbiddenResponse,
   getSessionUser,
   unauthorizedResponse,
@@ -14,6 +18,9 @@ type ReviewParams = {
 
 type RequestRow = {
   member_id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
   abandoned_weekday: number | null;
   abandoned_start_time: string | null;
   requested_weekday: number;
@@ -25,6 +32,14 @@ type SlotRow = {
   id: string;
   weekday: number;
   start_time: string;
+};
+
+const weekdaysByNumber: Record<number, string> = {
+  1: "Monday",
+  2: "Tuesday",
+  3: "Wednesday",
+  4: "Thursday",
+  5: "Friday",
 };
 
 export async function POST(request: Request, { params }: ReviewParams) {
@@ -62,6 +77,9 @@ export async function POST(request: Request, { params }: ReviewParams) {
       `
         select
           regular_slot_change_requests.member_id,
+          members.first_name,
+          members.last_name,
+          members.email,
           regular_slot_change_requests.abandoned_weekday,
           regular_slot_change_requests.abandoned_start_time,
           regular_slot_change_requests.requested_weekday,
@@ -220,6 +238,32 @@ export async function POST(request: Request, { params }: ReviewParams) {
   } else {
     for (const statement of statements) {
       await statement.run();
+    }
+  }
+
+  const memberName = `${requestRow.first_name} ${requestRow.last_name}`.trim();
+  const memberEvent = parseCorrespondenceEvent({
+    abandonedDay: requestRow.abandoned_weekday
+      ? weekdaysByNumber[requestRow.abandoned_weekday]
+      : "",
+    abandonedTime: requestRow.abandoned_start_time ?? "",
+    effectiveWeek: requestRow.effective_from,
+    kind:
+      status === "approved"
+        ? "regular-slot-request-approved"
+        : "regular-slot-request-declined",
+    memberName,
+    requestedDay: weekdaysByNumber[requestRow.requested_weekday],
+    requestedTime: requestRow.requested_start_time,
+  });
+
+  if (memberEvent) {
+    const emailResult = await sendCorrespondenceEmail(memberEvent, {
+      to: [requestRow.email],
+    });
+
+    if (!emailResult.ok) {
+      console.error("Unable to send regular slot review email", emailResult.error);
     }
   }
 
