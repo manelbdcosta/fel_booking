@@ -158,7 +158,7 @@ type ResetPasswordForm = {
 type InviteForm = {
   name: string;
   email: string;
-  role: InviteRole;
+  role: InviteRole | "";
   weeklyQuota: string;
   slots: RegularSlot[];
 };
@@ -690,7 +690,7 @@ export default function Home() {
   const [inviteForm, setInviteForm] = useState<InviteForm>({
     email: "",
     name: "",
-    role: "member",
+    role: "",
     slots: [],
     weeklyQuota: "",
   });
@@ -1618,7 +1618,7 @@ export default function Home() {
     setInviteForm({
       email: "",
       name: "",
-      role: "member",
+      role: "",
       slots: [],
       weeklyQuota: "",
     });
@@ -1695,18 +1695,25 @@ export default function Home() {
 
   async function submitInvitation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!inviteForm.role) {
+      setInviteNotice("Choose Member or Coach before sending the invite.");
+      return;
+    }
+
     setInviteBusy(true);
     setInviteNotice("Sending invite...");
+    const inviteRole = inviteForm.role;
 
     try {
       const response = await fetch(publicAppPath("/api/invitations"), {
         body: JSON.stringify({
           email: inviteForm.email,
           name: inviteForm.name,
-          role: inviteForm.role,
-          slots: inviteForm.role === "member" ? inviteForm.slots : [],
+          role: inviteRole,
+          slots: inviteRole === "member" ? inviteForm.slots : [],
           weeklyQuota:
-            inviteForm.role === "member" && inviteForm.weeklyQuota
+            inviteRole === "member" && inviteForm.weeklyQuota
               ? inviteForm.weeklyQuota
               : undefined,
         }),
@@ -1728,7 +1735,7 @@ export default function Home() {
         return;
       }
 
-      if ((payload.role ?? inviteForm.role) === "member") {
+      if ((payload.role ?? inviteRole) === "member") {
         const savedMember = payload.member;
 
         setMembers((currentMembers) =>
@@ -4639,7 +4646,28 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-[var(--line)] bg-black/20 p-3">
+              <div className="mb-2 text-sm font-medium">Account type</div>
+              <div className="grid grid-cols-2 gap-2">
+                {(["member", "coach"] as InviteRole[]).map((role) => (
+                  <button
+                    aria-pressed={inviteForm.role === role}
+                    className={`rounded-md border px-3 py-2 text-sm font-medium ${
+                      inviteForm.role === role
+                        ? "border-[var(--mint)] bg-[rgba(0,255,184,0.14)] text-white"
+                        : "border-[var(--line)] bg-black/20 text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
+                    }`}
+                    key={role}
+                    type="button"
+                    onClick={() => updateInviteRole(role)}
+                  >
+                    {inviteRoleLabel(role)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="block text-sm font-medium" htmlFor="inviteName">
                 Name
                 <input
@@ -4672,26 +4700,6 @@ export default function Home() {
                   }
                 />
               </label>
-            </div>
-
-            <div className="mt-3">
-              <div className="mb-2 text-sm font-medium">Role</div>
-              <div className="grid grid-cols-2 gap-2">
-                {(["member", "coach"] as InviteRole[]).map((role) => (
-                  <button
-                    className={`rounded-md border px-3 py-2 text-sm font-medium ${
-                      inviteForm.role === role
-                        ? "border-[var(--mint)] bg-[rgba(0,255,184,0.14)] text-white"
-                        : "border-[var(--line)] bg-black/20 text-[var(--muted)] hover:border-[var(--mint)] hover:text-white"
-                    }`}
-                    key={role}
-                    type="button"
-                    onClick={() => updateInviteRole(role)}
-                  >
-                    {inviteRoleLabel(role)}
-                  </button>
-                ))}
-              </div>
             </div>
 
             {inviteForm.role === "member" ? (
@@ -4871,9 +4879,13 @@ export default function Home() {
                   )}
                 </div>
               </>
-            ) : (
+            ) : inviteForm.role === "coach" ? (
               <p className="mt-3 rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
                 Coach invites create a coach account and send a password setup link.
+              </p>
+            ) : (
+              <p className="mt-3 rounded-lg border border-[var(--line)] bg-black/20 p-3 text-sm text-[var(--muted)]">
+                Choose Member or Coach before sending this invite.
               </p>
             )}
 
@@ -4886,7 +4898,7 @@ export default function Home() {
             <button
               className="mt-4 w-full rounded-md bg-[var(--mint)] px-3 py-2 text-sm font-semibold text-[#01161c] enabled:hover:bg-white disabled:opacity-45"
               type="submit"
-              disabled={inviteBusy}
+              disabled={inviteBusy || !inviteForm.role}
             >
               Send invite
             </button>

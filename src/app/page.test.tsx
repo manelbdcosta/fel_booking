@@ -366,6 +366,8 @@ describe("demo coach journey", () => {
 
     await user.click(screen.getByRole("button", { name: /Preview coach/ }));
     await user.click(screen.getByRole("button", { name: "Invite person" }));
+    expect(screen.getByRole("button", { name: "Send invite" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Member" }));
     await user.type(screen.getByLabelText("Name"), "Nia Guest");
     await user.type(screen.getByLabelText("Email"), "nia@example.com");
     await user.click(screen.getByRole("button", { name: "Send invite" }));
@@ -413,7 +415,10 @@ describe("demo coach journey", () => {
     expect(screen.getByText("3 total")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Invite person" }));
     expect(screen.getByRole("heading", { name: "Invite person" })).toBeTruthy();
-    expect(screen.getByText("Role")).toBeTruthy();
+    expect(screen.getByText("Account type")).toBeTruthy();
+    expect(screen.queryByText("Slot availability")).toBeNull();
+    expect(screen.getByRole("button", { name: "Send invite" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Member" }));
     expect(screen.getByText("Slot availability")).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Invite Monday 06:30 1/4 assigned" }),
