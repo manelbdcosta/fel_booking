@@ -2,6 +2,7 @@ import { emailConfig } from "@/lib/email-config";
 
 type CorrespondenceKind =
   | "account-invited"
+  | "password-set-confirmed"
   | "password-reset-requested"
   | "member-access-requested"
   | "regular-slot-change-requested"
@@ -37,6 +38,7 @@ export type CorrespondenceEvent = {
   bookingKind?: string;
   weeklyQuota?: string;
   inviteLink?: string;
+  loginLink?: string;
   role?: string;
   reviewLink?: string;
   resetLink?: string;
@@ -58,6 +60,7 @@ type SendCorrespondenceOptions = {
 
 const kindLabels: Record<CorrespondenceKind, string> = {
   "account-invited": "Account invitation",
+  "password-set-confirmed": "Password set",
   "password-reset-requested": "Password reset requested",
   "member-access-requested": "Member access requested",
   "regular-slot-change-requested": "Regular slot change requested",
@@ -171,6 +174,7 @@ function rowsForEvent(event: CorrespondenceEvent) {
     row("Weekly entitlement", event.weeklyQuota),
     row("Role", event.role),
     row("Invite link", event.inviteLink),
+    row("Login link", event.loginLink),
     row("Review link", event.reviewLink),
     row("Reset link", event.resetLink),
     row("Note", event.note),
@@ -208,6 +212,7 @@ export function parseCorrespondenceEvent(value: unknown) {
     bookingKind: cleanText(record.bookingKind),
     weeklyQuota: cleanText(record.weeklyQuota),
     inviteLink: cleanText(record.inviteLink),
+    loginLink: cleanText(record.loginLink),
     role: cleanText(record.role),
     reviewLink: cleanText(record.reviewLink),
     resetLink: cleanText(record.resetLink),
@@ -265,6 +270,26 @@ export function buildCorrespondenceEmail(event: CorrespondenceEvent) {
           <p style="margin:0 0 16px">Use this secure link to create a new Fit East London booking password. The link expires in 30 minutes.</p>
           <p style="margin:0 0 16px"><a href="${escapeHtml(event.resetLink ?? "")}" style="display:inline-block;border-radius:6px;background:#00ffb8;color:#01161c;font-weight:700;padding:10px 14px;text-decoration:none">Create new password</a></p>
           <p style="margin:0;color:#49666e;font-size:13px">${escapeHtml(event.resetLink ?? "")}</p>
+        </div>
+      `,
+    } satisfies BuiltCorrespondenceEmail;
+  }
+
+  if (event.kind === "password-set-confirmed") {
+    return {
+      subject: "[FEL Booking] Your password is set",
+      text: [
+        "Your Fit East London booking password has been set.",
+        "",
+        "Use this link to log in:",
+        event.loginLink,
+      ].join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.5;color:#09242c">
+          <h1 style="font-size:20px;margin:0 0 12px">Your password is set</h1>
+          <p style="margin:0 0 16px">Your Fit East London booking password has been set. Use this link to log in any time.</p>
+          <p style="margin:0 0 16px"><a href="${escapeHtml(event.loginLink ?? "")}" style="display:inline-block;border-radius:6px;background:#00ffb8;color:#01161c;font-weight:700;padding:10px 14px;text-decoration:none">Log in</a></p>
+          <p style="margin:0;color:#49666e;font-size:13px">${escapeHtml(event.loginLink ?? "")}</p>
         </div>
       `,
     } satisfies BuiltCorrespondenceEmail;

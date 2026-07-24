@@ -49,6 +49,25 @@ describe("outbound email correspondence", () => {
     expect(email.html).toContain("inviteToken=abc&amp;email=maddie@example.com");
   });
 
+  it("builds a password-set confirmation email with a login link", () => {
+    const event = parseCorrespondenceEvent({
+      kind: "password-set-confirmed",
+      loginLink: "https://example.com/?next=/dashboard&email=maddie@example.com",
+      memberName: "Maddie Cannon",
+    });
+
+    expect(event).toBeTruthy();
+
+    const email = buildCorrespondenceEmail(event!);
+
+    expect(email.subject).toBe("[FEL Booking] Your password is set");
+    expect(email.text).toContain("Use this link to log in");
+    expect(email.html).toContain("Log in");
+    expect(email.html).toContain(
+      "https://example.com/?next=/dashboard&amp;email=maddie@example.com",
+    );
+  });
+
   it("rejects unknown event kinds", () => {
     expect(parseCorrespondenceEvent({ kind: "send-anything" })).toBeNull();
   });

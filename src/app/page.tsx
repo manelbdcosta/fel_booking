@@ -3166,9 +3166,14 @@ export default function Home() {
         <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-5xl items-center gap-6 lg:grid-cols-[1fr_26rem]">
           <section className="space-y-6">
             <div className="flex items-center gap-3">
-              <div className="flex size-12 items-center justify-center rounded-lg border border-[var(--mint)] bg-[rgba(0,255,184,0.12)]">
+              <a
+                className="flex size-12 items-center justify-center rounded-lg border border-[var(--mint)] bg-[rgba(0,255,184,0.12)] hover:bg-[rgba(0,255,184,0.18)]"
+                href={publicAppPath("/")}
+                aria-label="Fit East London home"
+                title="Fit East London home"
+              >
                 <Dumbbell aria-hidden="true" className="size-6 text-[var(--mint)]" />
-              </div>
+              </a>
               <div>
                 <p className="text-sm text-[var(--muted)]">Fit East London</p>
                 <h1 className="text-3xl font-semibold">Booking</h1>
@@ -3602,9 +3607,14 @@ export default function Home() {
       <header className="relative border-b border-[var(--line)] bg-black/20">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-[var(--mint)] bg-[rgba(0,255,184,0.12)]">
+            <a
+              className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-[var(--mint)] bg-[rgba(0,255,184,0.12)] hover:bg-[rgba(0,255,184,0.18)]"
+              href={publicAppPath("/")}
+              aria-label="Fit East London home"
+              title="Fit East London home"
+            >
               <Dumbbell aria-hidden="true" className="size-5 text-[var(--mint)]" />
-            </div>
+            </a>
             <div className="min-w-0">
               <p className="truncate text-sm text-[var(--muted)]">Fit East London</p>
               <h1 className="truncate text-xl font-semibold">Booking</h1>

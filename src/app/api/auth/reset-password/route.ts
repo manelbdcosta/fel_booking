@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { hashToken } from "@/lib/auth-tokens";
 import { normalizeEmail, requireDatabase } from "@/lib/database";
 import { cleanPassword, hashPassword, validatePassword } from "@/lib/passwords";
+import { sendPasswordSetConfirmationEmail } from "@/lib/password-set-confirmation";
 import { createSessionCookie, sessionUserPayload } from "@/lib/session";
 
 type ResetTokenRow = {
@@ -108,11 +109,21 @@ export async function POST(request: Request) {
     .bind(resetToken.id)
     .run();
 
+  const notification = await sendPasswordSetConfirmationEmail(member);
+
   if (member.status !== "active") {
-    return NextResponse.json({ ok: true, user: null });
+    return NextResponse.json({
+      ok: true,
+      notificationSent: notification.ok,
+      user: null,
+    });
   }
 
   await createSessionCookie(db, member);
 
-  return NextResponse.json({ ok: true, user: sessionUserPayload(member) });
+  return NextResponse.json({
+    ok: true,
+    notificationSent: notification.ok,
+    user: sessionUserPayload(member),
+  });
 }

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { hashToken } from "@/lib/auth-tokens";
 import { normalizeEmail, requireDatabase } from "@/lib/database";
 import { cleanPassword, hashPassword, validatePassword } from "@/lib/passwords";
+import { sendPasswordSetConfirmationEmail } from "@/lib/password-set-confirmation";
 import { createSessionCookie, sessionUserPayload } from "@/lib/session";
 
 type InviteRow = {
@@ -119,6 +120,11 @@ export async function POST(request: Request) {
   }
 
   await createSessionCookie(db, member);
+  const notification = await sendPasswordSetConfirmationEmail(member);
 
-  return NextResponse.json({ ok: true, user: sessionUserPayload(member) });
+  return NextResponse.json({
+    ok: true,
+    notificationSent: notification.ok,
+    user: sessionUserPayload(member),
+  });
 }

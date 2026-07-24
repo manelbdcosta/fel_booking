@@ -44,6 +44,11 @@ describe("demo account entry", () => {
     const user = renderHome();
     render(<Home />);
 
+    expect(screen.getByRole("link", { name: "Fit East London home" })).toHaveAttribute(
+      "href",
+      "/",
+    );
+
     await user.click(screen.getByRole("button", { name: "Forgot password?" }));
     await user.type(screen.getByLabelText("Email"), "coach@example.com");
     await user.click(screen.getByRole("button", { name: "Send reset link" }));
