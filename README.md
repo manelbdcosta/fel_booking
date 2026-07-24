@@ -81,7 +81,7 @@ https://fiteast-scheduling.intentionalsets.com
 
 The Worker uses OpenNext for the Next.js runtime, D1 database binding `DB`, and Resend for outbound email. The D1 migrations live in `migrations/d1`.
 
-The live app stores member signups, member status, recurring slots, regular-slot change requests, password reset tokens, sessions, materialized bookings, credits, and waitlist entries in D1. Signups create pending members with passwords, coaches can approve pending members, and regular-slot changes are written to D1 through route handlers.
+The live app stores member signups, member status, recurring slots, regular-slot change requests, holiday periods, password reset tokens, sessions, materialized bookings, credits, and waitlist entries in D1. Signups create pending members with passwords, coaches can approve pending members, and regular-slot changes are written to D1 through route handlers.
 
 Useful commands:
 
@@ -151,3 +151,4 @@ The current demo journeys covered by tests are:
 - Dashboard counters are lifetime totals.
 - Archiving a member cancels future bookings, removes recurring slots, clears waitlists, and preserves history.
 - Coaches can override quota, cutoff, capacity, and closures.
+- Members can set holiday dates. Booked sessions in that period are cancelled, credited, and emailed to coaches with the away dates and accrued credit count.

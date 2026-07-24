@@ -68,6 +68,27 @@ describe("outbound email correspondence", () => {
     );
   });
 
+  it("builds a member holiday email with dates and credit count", () => {
+    const event = parseCorrespondenceEvent({
+      cancelledCount: "3",
+      creditCount: "3",
+      holidayEnd: "2026-07-24 (24 Jul)",
+      holidayStart: "2026-07-13 (13 Jul)",
+      kind: "member-holiday-set",
+      memberName: "Maddie Cannon",
+    });
+
+    expect(event).toBeTruthy();
+
+    const email = buildCorrespondenceEmail(event!);
+
+    expect(email.subject).toBe("[FEL Booking] Maddie Cannon holiday");
+    expect(email.text).toContain("Away from: 2026-07-13 (13 Jul)");
+    expect(email.text).toContain("Credits accrued: 3");
+    expect(email.html).toContain("Holiday start");
+    expect(email.html).toContain("Credits accrued");
+  });
+
   it("rejects unknown event kinds", () => {
     expect(parseCorrespondenceEvent({ kind: "send-anything" })).toBeNull();
   });

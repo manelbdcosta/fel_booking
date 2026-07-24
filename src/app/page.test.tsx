@@ -87,6 +87,21 @@ describe("demo member journey", () => {
     expect(screen.getByText("Coach approval required")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Notifications" })).toBeNull();
     expect(screen.queryByText("Emma, Gemma, Reserved, Drop-in")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Set time away" })).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Beginning"), {
+      target: { value: "2026-07-09" },
+    });
+    fireEvent.change(screen.getByLabelText("End"), {
+      target: { value: "2026-07-10" },
+    });
+    await user.click(screen.getByRole("button", { name: "Set holiday" }));
+
+    expect(
+      screen.getByText(
+        "Holiday set for 9 Jul - 10 Jul. 2 bookings cancelled and 2 credits added.",
+      ),
+    ).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Request change" }));
     await user.selectOptions(screen.getByLabelText("Current regular slot"), "Monday|06:30");

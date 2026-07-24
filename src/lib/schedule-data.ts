@@ -80,6 +80,11 @@ type WaitlistRow = {
   start_time: string;
 };
 
+type HolidayBookingRow = {
+  id: string;
+  session_date: string;
+};
+
 type SlotClosureRow = {
   session_date: string;
   start_time: string;
@@ -100,6 +105,17 @@ type BookingActionResult =
     }
   | { ok: false; status: number; error: string };
 
+type HolidayActionResult =
+  | {
+      ok: true;
+      cancelledCount: number;
+      creditCount: number;
+      endsOn: string;
+      schedule: ScheduleData;
+      startsOn: string;
+    }
+  | { ok: false; status: number; error: string };
+
 const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 const validSlotTimes = new Set<string>(bookingRules.slotTimes);
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -109,6 +125,12 @@ export function addDays(isoDate: string, days: number) {
   const date = new Date(Date.UTC(year, month - 1, day + days, 12));
 
   return date.toISOString().slice(0, 10);
+}
+
+function isoDateToUtcMs(isoDate: string) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+
+  return Date.UTC(year, month - 1, day, 12);
 }
 
 export function shortDate(isoDate: string) {
@@ -310,6 +332,26 @@ async function isSlotClosed(
   return Boolean(closure);
 }
 
+async function isMemberOnHoliday(
+  db: D1DatabaseBinding,
+  memberId: string,
+  sessionDate: string,
+) {
+  const holiday = await db
+    .prepare(
+      `
+        select id
+        from member_holidays
+        where member_id = ?1 and ?2 between starts_on and ends_on
+        limit 1
+      `,
+    )
+    .bind(memberId, sessionDate)
+    .first<{ id: string }>();
+
+  return Boolean(holiday);
+}
+
 async function availableCreditIdFor(
   db: D1DatabaseBinding,
   memberId: string,
@@ -403,6 +445,13 @@ export async function materializeRegularBookingsForWeek(
                   where
                     closure.session_date = ?3
                     and closure.start_time = ?4
+                )
+                and not exists (
+                  select 1
+                  from member_holidays holiday
+                  where
+                    holiday.member_id = ?2
+                    and ?3 between holiday.starts_on and holiday.ends_on
                 )
             `,
           )
@@ -614,6 +663,14 @@ export async function createBooking(
 
   if (await isSlotClosed(db, sessionDate, startTime)) {
     return { ok: false, status: 409, error: "This session is closed." };
+  }
+
+  if (await isMemberOnHoliday(db, targetMember.id, sessionDate)) {
+    return {
+      ok: false,
+      status: 409,
+      error: "This member is marked away for this date.",
+    };
   }
 
   await materializeRegularBookingsForWeek(db, weekStart);
@@ -834,6 +891,187 @@ export async function cancelBooking(
   };
 }
 
+function daySpanInclusive(startsOn: string, endsOn: string) {
+  return (isoDateToUtcMs(endsOn) - isoDateToUtcMs(startsOn)) / 86_400_000 + 1;
+}
+
+async function materializeRegularBookingsForRange(
+  db: D1DatabaseBinding,
+  startsOn: string,
+  endsOn: string,
+) {
+  let weekStart = weekStartFromIso(startsOn);
+  const finalWeekStart = weekStartFromIso(endsOn);
+
+  while (weekStart <= finalWeekStart) {
+    await materializeRegularBookingsForWeek(db, weekStart);
+    weekStart = addDays(weekStart, 7);
+  }
+}
+
+export async function setMemberHoliday(
+  db: D1DatabaseBinding,
+  user: SessionUser,
+  input: {
+    endsOn: string;
+    startsOn: string;
+    weekStart?: string;
+  },
+): Promise<HolidayActionResult> {
+  if (user.role !== "member") {
+    return { ok: false, status: 403, error: "Member access required." };
+  }
+
+  const startsOn = cleanSessionDate(input.startsOn);
+  const endsOn = cleanSessionDate(input.endsOn);
+
+  if (!startsOn || !endsOn) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Holiday start and end dates are required.",
+    };
+  }
+
+  const today = todayIsoDate();
+
+  if (startsOn < today) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Holiday start must be today or later.",
+    };
+  }
+
+  if (endsOn < startsOn) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Holiday end must be on or after the start date.",
+    };
+  }
+
+  if (daySpanInclusive(startsOn, endsOn) > 366) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Holiday range cannot be longer than 366 days.",
+    };
+  }
+
+  const targetMember = await getTargetMember(db, user, user.id);
+
+  if (!targetMember || targetMember.status !== "active") {
+    return { ok: false, status: 404, error: "Active member not found." };
+  }
+
+  await materializeRegularBookingsForRange(db, startsOn, endsOn);
+
+  const bookedSessions = await allRows<HolidayBookingRow>(
+    db,
+    `
+      select id, session_date
+      from bookings
+      where
+        member_id = ?1
+        and session_date between ?2 and ?3
+        and session_date >= ?4
+        and status = 'booked'
+      order by session_date, start_time
+    `,
+    targetMember.id,
+    startsOn,
+    endsOn,
+    today,
+  );
+  const creditCount = bookedSessions.length;
+  const statements: ReturnType<D1DatabaseBinding["prepare"]>[] = [
+    db
+      .prepare(
+        `
+          insert into member_holidays (
+            id,
+            member_id,
+            starts_on,
+            ends_on,
+            cancelled_booking_count,
+            credit_count
+          ) values (?1, ?2, ?3, ?4, ?5, ?6)
+        `,
+      )
+      .bind(
+        createId("holiday"),
+        targetMember.id,
+        startsOn,
+        endsOn,
+        bookedSessions.length,
+        creditCount,
+      ),
+    db
+      .prepare(
+        `
+          update bookings
+          set
+            status = 'cancelled',
+            cancelled_at = datetime('now'),
+            cancelled_by = ?1,
+            updated_at = datetime('now')
+          where
+            member_id = ?1
+            and session_date between ?2 and ?3
+            and session_date >= ?4
+            and status = 'booked'
+        `,
+      )
+      .bind(targetMember.id, startsOn, endsOn, today),
+    db
+      .prepare(
+        `
+          delete from waitlist_entries
+          where
+            member_id = ?1
+            and session_date between ?2 and ?3
+            and session_date >= ?4
+        `,
+      )
+      .bind(targetMember.id, startsOn, endsOn, today),
+    ...bookedSessions.map((booking) =>
+      db
+        .prepare(
+          `
+            insert or ignore into credits (
+              id,
+              member_id,
+              origin_booking_id,
+              origin,
+              expires_on
+            ) values (?1, ?2, ?3, 'cancellation', ?4)
+          `,
+        )
+        .bind(
+          createId("credit"),
+          targetMember.id,
+          booking.id,
+          addDays(booking.session_date, bookingRules.creditExpiryDays),
+        ),
+    ),
+  ];
+
+  await runBatch(db, statements);
+
+  return {
+    ok: true,
+    cancelledCount: bookedSessions.length,
+    creditCount,
+    endsOn,
+    schedule: await readScheduleData(db, user, {
+      memberId: targetMember.id,
+      weekStart: input.weekStart ?? startsOn,
+    }),
+    startsOn,
+  };
+}
+
 export async function joinWaitlist(
   db: D1DatabaseBinding,
   user: SessionUser,
@@ -859,6 +1097,14 @@ export async function joinWaitlist(
 
   if (await isSlotClosed(db, sessionDate, startTime)) {
     return { ok: false, status: 409, error: "This session is closed." };
+  }
+
+  if (await isMemberOnHoliday(db, targetMember.id, sessionDate)) {
+    return {
+      ok: false,
+      status: 409,
+      error: "This member is marked away for this date.",
+    };
   }
 
   await materializeRegularBookingsForWeek(db, weekStart);

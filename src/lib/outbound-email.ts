@@ -4,6 +4,7 @@ type CorrespondenceKind =
   | "account-invited"
   | "password-set-confirmed"
   | "password-reset-requested"
+  | "member-holiday-set"
   | "member-access-requested"
   | "regular-slot-change-requested"
   | "regular-slot-assigned"
@@ -36,7 +37,11 @@ export type CorrespondenceEvent = {
   note?: string;
   bookingDate?: string;
   bookingKind?: string;
+  cancelledCount?: string;
+  creditCount?: string;
   weeklyQuota?: string;
+  holidayEnd?: string;
+  holidayStart?: string;
   inviteLink?: string;
   loginLink?: string;
   role?: string;
@@ -62,6 +67,7 @@ const kindLabels: Record<CorrespondenceKind, string> = {
   "account-invited": "Account invitation",
   "password-set-confirmed": "Password set",
   "password-reset-requested": "Password reset requested",
+  "member-holiday-set": "Member holiday set",
   "member-access-requested": "Member access requested",
   "regular-slot-change-requested": "Regular slot change requested",
   "regular-slot-assigned": "Regular slot assigned",
@@ -171,6 +177,10 @@ function rowsForEvent(event: CorrespondenceEvent) {
     row("Booking date", event.bookingDate),
     row("Booking time", event.time),
     row("Booking kind", event.bookingKind),
+    row("Cancelled bookings", event.cancelledCount),
+    row("Credits accrued", event.creditCount),
+    row("Holiday start", event.holidayStart),
+    row("Holiday end", event.holidayEnd),
     row("Weekly entitlement", event.weeklyQuota),
     row("Role", event.role),
     row("Invite link", event.inviteLink),
@@ -210,6 +220,10 @@ export function parseCorrespondenceEvent(value: unknown) {
     note: cleanText(record.note),
     bookingDate: cleanText(record.bookingDate),
     bookingKind: cleanText(record.bookingKind),
+    cancelledCount: cleanText(record.cancelledCount),
+    creditCount: cleanText(record.creditCount),
+    holidayEnd: cleanText(record.holidayEnd),
+    holidayStart: cleanText(record.holidayStart),
     weeklyQuota: cleanText(record.weeklyQuota),
     inviteLink: cleanText(record.inviteLink),
     loginLink: cleanText(record.loginLink),
@@ -320,6 +334,29 @@ export function buildCorrespondenceEmail(event: CorrespondenceEvent) {
             ${htmlRows}
           </table>
           <p style="margin:18px 0 0"><a href="${escapeHtml(event.reviewLink ?? "")}" style="display:inline-block;border-radius:6px;background:#00ffb8;color:#01161c;font-weight:700;padding:10px 14px;text-decoration:none">Review signup</a></p>
+        </div>
+      `,
+    } satisfies BuiltCorrespondenceEmail;
+  }
+
+  if (event.kind === "member-holiday-set") {
+    return {
+      subject: `[FEL Booking] ${event.memberName} holiday`,
+      text: [
+        `${event.memberName} has set holiday time.`,
+        "",
+        `Away from: ${event.holidayStart}`,
+        `Away until: ${event.holidayEnd}`,
+        `Credits accrued: ${event.creditCount}`,
+        `Bookings cancelled: ${event.cancelledCount}`,
+      ].join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.5;color:#09242c">
+          <h1 style="font-size:20px;margin:0 0 12px">${escapeHtml(event.memberName ?? "Member")} holiday</h1>
+          <p style="margin:0 0 16px">${escapeHtml(event.memberName ?? "A member")} has set holiday time.</p>
+          <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;max-width:640px">
+            ${htmlRows}
+          </table>
         </div>
       `,
     } satisfies BuiltCorrespondenceEmail;

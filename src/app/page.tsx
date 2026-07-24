@@ -127,6 +127,11 @@ type RegularSlotChangeForm = {
   note: string;
 };
 
+type HolidayForm = {
+  startsOn: string;
+  endsOn: string;
+};
+
 type CoachRegularSlotForm = {
   memberName: string;
   day: string;
@@ -750,6 +755,15 @@ export default function Home() {
       effectiveWeek: "2026-07-20",
       note: "",
     });
+  const [holidayForm, setHolidayForm] = useState<HolidayForm>(() => {
+    const startsOn = todayIsoDate();
+
+    return {
+      startsOn,
+      endsOn: addDays(startsOn, 7),
+    };
+  });
+  const [holidayBusy, setHolidayBusy] = useState(false);
   const [coachRegularSlotForm, setCoachRegularSlotForm] =
     useState<CoachRegularSlotForm>({
       memberName: "Maddie Cannon",
@@ -2011,6 +2025,129 @@ export default function Home() {
     setMessage(
       `Reopened ${bookingLabel(day)} at ${slot.time}. Members can book it again.`,
     );
+  }
+
+  async function submitHoliday(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const startsOn = holidayForm.startsOn;
+    const endsOn = holidayForm.endsOn;
+    const today = todayIsoDate();
+
+    if (!startsOn || !endsOn) {
+      setMessage("Choose the beginning and end date for your holiday.");
+      return;
+    }
+
+    if (startsOn < today) {
+      setMessage("Holiday start must be today or later.");
+      return;
+    }
+
+    if (endsOn < startsOn) {
+      setMessage("Holiday end must be on or after the beginning date.");
+      return;
+    }
+
+    setHolidayBusy(true);
+
+    try {
+      if (currentUser) {
+        const response = await fetch(publicAppPath("/api/holidays"), {
+          body: JSON.stringify({
+            endsOn,
+            startsOn,
+            weekStart: weekStartForOffset(weekOffset),
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          cancelledCount?: number;
+          creditCount?: number;
+          error?: string;
+          notificationError?: string | null;
+          notificationSent?: boolean;
+          schedule?: ScheduleData;
+        };
+
+        if (!response.ok || !payload.schedule) {
+          setMessage(payload.error ?? "Could not set this holiday yet.");
+          return;
+        }
+
+        applyScheduleData(payload.schedule, weekOffset);
+        setMessage(
+          payload.notificationSent === false
+            ? `Holiday set for ${shortDate(startsOn)} - ${shortDate(endsOn)}. ${payload.cancelledCount ?? 0} bookings cancelled and ${payload.creditCount ?? 0} credits added, but coach email failed: ${payload.notificationError ?? "unknown error"}`
+            : `Holiday set for ${shortDate(startsOn)} - ${shortDate(endsOn)}. ${payload.cancelledCount ?? 0} bookings cancelled and ${payload.creditCount ?? 0} credits added.`,
+        );
+        return;
+      }
+
+      const cancelledBookings = upcoming.filter(
+        (booking) => booking.isoDate >= startsOn && booking.isoDate <= endsOn,
+      );
+
+      setWeeks((storedWeeks) => {
+        const nextWeeks: Record<number, ScheduleDay[]> = {};
+
+        for (const [offset, storedWeek] of Object.entries(storedWeeks)) {
+          nextWeeks[Number(offset)] = storedWeek.map((day) =>
+            day.isoDate >= startsOn && day.isoDate <= endsOn
+              ? {
+                  ...day,
+                  slots: day.slots.map((slot) => ({
+                    ...slot,
+                    ...(slot.memberIds
+                      ? {
+                          memberIds: slot.memberIds.filter(
+                            (memberId) => memberId !== activeMember.id,
+                          ),
+                        }
+                      : {}),
+                    names: slot.names.filter(
+                      (name) => name !== activeMember.firstName,
+                    ),
+                  })),
+                }
+              : day,
+          );
+        }
+
+        return nextWeeks;
+      });
+      setUpcoming((currentUpcoming) =>
+        currentUpcoming.filter(
+          (booking) => booking.isoDate < startsOn || booking.isoDate > endsOn,
+        ),
+      );
+      setWaitlist((currentWaitlist) =>
+        currentWaitlist.filter(
+          (entry) => entry.isoDate < startsOn || entry.isoDate > endsOn,
+        ),
+      );
+      setCredits((currentCredits) => [
+        ...currentCredits,
+        ...cancelledBookings.map((booking) => ({
+          id: `holiday-credit-${booking.id}`,
+          label: booking.date,
+          expiry: shortDate(addDays(booking.isoDate, bookingRules.creditExpiryDays)),
+        })),
+      ]);
+      queueCorrespondence({
+        cancelledCount: String(cancelledBookings.length),
+        creditCount: String(cancelledBookings.length),
+        holidayEnd: `${endsOn} (${shortDate(endsOn)})`,
+        holidayStart: `${startsOn} (${shortDate(startsOn)})`,
+        kind: "member-holiday-set",
+        memberName: activeMemberFullName,
+      });
+      setMessage(
+        `Holiday set for ${shortDate(startsOn)} - ${shortDate(endsOn)}. ${cancelledBookings.length} bookings cancelled and ${cancelledBookings.length} credits added.`,
+      );
+    } finally {
+      setHolidayBusy(false);
+    }
   }
 
   async function approveMemberAccess(memberToApprove: DemoMember) {
@@ -3729,6 +3866,76 @@ export default function Home() {
           </div>
         )}
       </header>
+
+      {!isCoach && (
+        <section className="mx-auto max-w-7xl px-4 pt-6 sm:px-6">
+          <form
+            className="rounded-lg border border-[var(--line)] bg-[var(--panel)] p-4"
+            onSubmit={submitHoliday}
+          >
+            <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
+                  <CalendarDays aria-hidden="true" className="size-4" />
+                  Holiday
+                </div>
+                <h2 className="mt-1 text-2xl font-semibold">Set time away</h2>
+                <p className="mt-1 max-w-2xl text-sm text-[var(--muted)]">
+                  Booked sessions in this period will be cancelled and credited.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+                <label className="block text-sm font-medium" htmlFor="holidayStartsOn">
+                  Beginning
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                    id="holidayStartsOn"
+                    min={todayIsoDate()}
+                    type="date"
+                    required
+                    value={holidayForm.startsOn}
+                    onChange={(event) =>
+                      setHolidayForm((current) => ({
+                        ...current,
+                        startsOn: event.target.value,
+                        endsOn:
+                          current.endsOn && current.endsOn >= event.target.value
+                            ? current.endsOn
+                            : event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="block text-sm font-medium" htmlFor="holidayEndsOn">
+                  End
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-md border border-[var(--line)] bg-black/20 px-3 text-sm outline-none focus:border-[var(--mint)]"
+                    id="holidayEndsOn"
+                    min={holidayForm.startsOn || todayIsoDate()}
+                    type="date"
+                    required
+                    value={holidayForm.endsOn}
+                    onChange={(event) =>
+                      setHolidayForm((current) => ({
+                        ...current,
+                        endsOn: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <button
+                  className="min-h-11 rounded-md bg-[var(--mint)] px-4 py-2 text-sm font-semibold text-[#01161c] hover:bg-white disabled:opacity-60"
+                  type="submit"
+                  disabled={holidayBusy}
+                >
+                  Set holiday
+                </button>
+              </div>
+            </div>
+          </form>
+        </section>
+      )}
 
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[340px_1fr]">
         <aside className="space-y-5">
